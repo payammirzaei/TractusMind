@@ -121,7 +121,11 @@ class OpenAICompatibleLLM:
                 )
             except httpx.TransportError as exc:
                 transient_error = exc
-                transient_reason = "timeout" if isinstance(exc, httpx.TimeoutException) else "transport"
+                transient_reason = (
+                    "timeout"
+                    if isinstance(exc, httpx.TimeoutException)
+                    else "transport"
+                )
                 if attempt < self.max_attempts:
                     await self._retry(
                         attempt=attempt,
