@@ -33,6 +33,8 @@ class GroundedContext:
                 source_url=block.hit.source_url,
                 retrieval_score=block.hit.retrieval_score,
                 rerank_score=block.hit.rerank_score,
+                debug_score=block.hit.debug_score,
+                retrieval_methods=block.hit.retrieval_methods,
             )
             for block in self.blocks
         }
