@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     app_port: int = 8000
     log_level: str = "INFO"
+    docs_enabled: bool = True
 
     trusted_hosts: str = "localhost,127.0.0.1,api,testserver"
     cors_origins: str = ""
