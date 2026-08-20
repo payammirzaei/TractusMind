@@ -10,6 +10,10 @@ from app.quality.models import QualityReview, RegressionCase
 from app.state.models import Base
 
 
+class ReviewStateError(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class ReviewRecord:
     review_id: str
@@ -135,6 +139,8 @@ class QualityStore:
             review = await session.get(QualityReview, review_id)
             if review is None:
                 return None
+            if review.status != "pending":
+                raise ReviewStateError(f"review is already {review.status}")
             review.status = "dismissed"
             review.root_cause = root_cause
             review.reviewer_note = reviewer_note
@@ -157,15 +163,17 @@ class QualityStore:
             review = await session.get(QualityReview, review_id)
             if review is None:
                 return None
-            interaction = await session.get(AnswerInteraction, review.interaction_id)
-            if interaction is None:
-                return None
             existing = await session.scalar(
                 select(RegressionCase).where(RegressionCase.review_id == review_id)
             )
             if existing is not None:
                 return self._regression_record(existing)
+            if review.status != "pending":
+                raise ReviewStateError(f"review is already {review.status}")
 
+            interaction = await session.get(AnswerInteraction, review.interaction_id)
+            if interaction is None:
+                return None
             case = RegressionCase(
                 review_id=review.review_id,
                 interaction_id=interaction.interaction_id,
