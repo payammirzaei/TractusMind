@@ -1,0 +1,18 @@
+{"id":"sdk-create-asset","category":"coding","question":"How do I create an asset with the Tractus-X SDK?","answerable":true,"expected_sources":["tractusx-sdk"],"expected_terms":["asset"]}
+{"id":"sdk-contract-negotiation","category":"coding","question":"Show me how to start a contract negotiation with the Tractus-X SDK.","answerable":true,"expected_sources":["tractusx-sdk"],"expected_terms":["contract"]}
+{"id":"edc-control-data-plane","category":"concept","question":"What is the difference between the EDC control plane and data plane?","answerable":true,"expected_sources":["tractusx-edc"],"expected_terms":["control","data"]}
+{"id":"edc-management-policy","category":"how-to","question":"Where are policies configured or managed in Tractus-X EDC?","answerable":true,"expected_sources":["tractusx-edc"],"expected_terms":["policy"]}
+{"id":"dtr-shell-descriptor","category":"coding","question":"How can I create an AAS shell descriptor for the Digital Twin Registry?","answerable":true,"expected_sources":["tractusx-sdk","digital-twin-registry"],"expected_terms":["shell"]}
+{"id":"sdk-discovery-bpn","category":"coding","question":"How do I discover a connector by BPN?","answerable":true,"expected_sources":["tractusx-sdk"],"expected_terms":["bpn"]}
+{"id":"semantic-samm","category":"semantic-model","question":"Where are the Tractus-X SAMM semantic models defined?","answerable":true,"expected_sources":["semantic-models"],"expected_terms":["samm"]}
+{"id":"sdk-dataspace-consume","category":"how-to","question":"How can an application consume data from a dataspace using the Tractus-X SDK?","answerable":true,"expected_sources":["tractusx-sdk"],"expected_terms":["connector"]}
+{"id":"edc-build","category":"coding","question":"How do I build the Tractus-X EDC container images?","answerable":true,"expected_sources":["tractusx-edc"],"expected_terms":["docker"]}
+{"id":"version-traceability","category":"version","question":"Which source version or commit does this Tractus-X implementation come from?","answerable":true,"expected_sources":["tractusx-sdk","tractusx-edc"],"expected_terms":["commit"]}
+{"id":"docs-business-partner-bpn","category":"documentation","question":"How does the Tractus-X Business Partner KIT describe the Business Partner Number?","answerable":true,"expected_sources":["tractusx-docs"],"expected_terms":["bpn"]}
+{"id":"release-calendar-versioning","category":"release","question":"What versioning scheme does Tractus-X use for overarching quarterly releases?","answerable":true,"expected_sources":["tractusx-release"],"expected_terms":["calendar versioning"]}
+{"id":"negative-weather","category":"negative","question":"What will the weather in Stuttgart be tomorrow?","answerable":false,"expected_sources":[],"expected_terms":[]}
+{"id":"negative-fictional-api","category":"negative","question":"What does HyperDriveConnector.createQuantumAsset() do in Tractus-X?","answerable":false,"expected_sources":[],"expected_terms":[]}
+{"id":"negative-future-release","category":"negative","question":"What breaking changes are planned for Tractus-X release 99.0?","answerable":false,"expected_sources":[],"expected_terms":[]}
+{"id":"negative-private-password","category":"negative","question":"What production database password do the Tractus-X maintainers use?","answerable":false,"expected_sources":[],"expected_terms":[]}
+{"id":"negative-maintainer-address","category":"negative","question":"What is the home address of the Tractus-X EDC lead maintainer?","answerable":false,"expected_sources":[],"expected_terms":[]}
+{"id":"negative-error-code","category":"negative","question":"What is the official fix for Tractus-X EDC error TX-999999?","answerable":false,"expected_sources":[],"expected_terms":[]}
