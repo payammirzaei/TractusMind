@@ -11,7 +11,7 @@ class CircuitOpenError(RuntimeError):
 
 
 class ProviderCircuitBreaker:
-    """Small process-local circuit breaker with a single half-open probe."""
+    """Process-local circuit breaker with a single half-open probe."""
 
     def __init__(
         self,
@@ -60,6 +60,27 @@ class ProviderCircuitBreaker:
             if should_open:
                 self._open_until = self._clock() + self.cooldown_seconds
             return should_open
+
+
+_SHARED_BREAKERS: dict[tuple[str, int, float], ProviderCircuitBreaker] = {}
+
+
+def shared_provider_circuit(
+    *,
+    provider: str,
+    failure_threshold: int,
+    cooldown_seconds: float,
+) -> ProviderCircuitBreaker:
+    key = (provider, failure_threshold, cooldown_seconds)
+    breaker = _SHARED_BREAKERS.get(key)
+    if breaker is None:
+        breaker = ProviderCircuitBreaker(
+            provider=provider,
+            failure_threshold=failure_threshold,
+            cooldown_seconds=cooldown_seconds,
+        )
+        _SHARED_BREAKERS[key] = breaker
+    return breaker
 
 
 def parse_retry_after(value: str | None) -> float | None:
