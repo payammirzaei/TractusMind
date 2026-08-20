@@ -27,6 +27,7 @@ permissions:
 
 jobs:
   full-stack:
+    # Release-candidate validation uses the same topology and smoke path as main.
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
