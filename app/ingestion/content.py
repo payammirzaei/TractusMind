@@ -95,6 +95,7 @@ class GitHubContentFetcher:
             source_id=manifest.source_id,
             repository=manifest.repository,
             component=manifest.component,
+            version_ref=manifest.requested_ref,
             commit_sha=manifest.commit_sha,
             path=source_file.path,
             blob_sha=source_file.sha,
