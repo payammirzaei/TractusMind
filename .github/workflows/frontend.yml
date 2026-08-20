@@ -99,6 +99,9 @@ jobs:
           npm run smoke:bff
           npm run smoke:oidc-disabled
 
+      - name: Prepare development topology fixture
+        run: cp ../.env.example ../.env
+
       - name: Validate development UI topology
         run: >-
           docker compose
