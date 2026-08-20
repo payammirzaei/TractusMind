@@ -1,8 +1,11 @@
 import asyncio
 from collections.abc import Sequence
 from functools import cached_property
+from time import perf_counter
 
 from fastembed import TextEmbedding
+
+from app.observability.metrics import MODEL_OPERATION_DURATION, record_model_load
 
 
 class DenseEmbeddingService:
@@ -16,6 +19,7 @@ class DenseEmbeddingService:
     ) -> None:
         self.model_name = model_name
         self.batch_size = batch_size
+        self._warmed = False
 
     @cached_property
     def model(self) -> TextEmbedding:
@@ -28,13 +32,23 @@ class DenseEmbeddingService:
     async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
         if not texts:
             return []
-        return await asyncio.to_thread(self._embed_documents, list(texts))
+        return await self._run("documents", self._embed_documents, list(texts))
 
     async def embed_query(self, query: str) -> list[float]:
         normalized = query.strip()
         if not normalized:
             raise ValueError("Query must not be empty")
-        return await asyncio.to_thread(self._embed_query, normalized)
+        return await self._run("query", self._embed_query, normalized)
+
+    async def _run(self, operation: str, function, argument):
+        started = perf_counter()
+        result = await asyncio.to_thread(function, argument)
+        duration = perf_counter() - started
+        MODEL_OPERATION_DURATION.labels(role="dense", operation=operation).observe(duration)
+        if not self._warmed:
+            record_model_load("dense", duration)
+            self._warmed = True
+        return result
 
     def _embed_documents(self, texts: list[str]) -> list[list[float]]:
         return [
