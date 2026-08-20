@@ -25,6 +25,16 @@ import { cn } from "@/lib/utils";
 
 export type MissionView = "chat" | "sources" | "ops" | "quality" | "admin";
 
+type HealthCheck = "ok" | "error";
+type SystemHealth = {
+  status: "ok" | "degraded";
+  checks: {
+    postgres: HealthCheck;
+    redis: HealthCheck;
+    qdrant: HealthCheck;
+  };
+};
+
 const NAV: Array<{ view: MissionView; href: string; label: string; icon: typeof Bot; minimum: UserRole }> = [
   { view: "chat", href: "/", label: "Copilot", icon: Bot, minimum: "user" },
   { view: "sources", href: "/sources", label: "Sources", icon: Database, minimum: "operator" },
@@ -89,15 +99,76 @@ function BootPanel() {
   return <main className="grid min-h-screen place-items-center"><div className="flex items-center gap-3"><span className="tm-led cyan"/><span className="tm-label">initializing mission control</span></div></main>;
 }
 
+function HealthPanel({ health, reachable }: { health: SystemHealth | null; reachable: boolean }) {
+  const state = !reachable ? "offline" : health?.status ?? "checking";
+  const led = state === "degraded" ? "amber" : state === "offline" ? "red" : state === "checking" ? "cyan" : "";
+  const checks: Array<[keyof SystemHealth["checks"], string]> = [
+    ["postgres", "Postgres"],
+    ["redis", "Redis"],
+    ["qdrant", "Qdrant"],
+  ];
+
+  return (
+    <div className="tm-well rounded-xl p-3" aria-live="polite">
+      <div className="flex items-center gap-2"><span className={`tm-led ${led}`}/><span className="tm-label">Core {state}</span></div>
+      <div className="mt-3 grid grid-cols-2 gap-2 text-[10px] text-slate-600">
+        {checks.map(([key, label]) => {
+          const check = health?.checks[key];
+          return (
+            <div key={key} className="contents">
+              <span>{label}</span>
+              <span className={cn("text-right", check === "ok" ? "text-emerald-300" : check === "error" ? "text-red-300" : "text-slate-500")}>{check ?? "—"}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function MissionControl({ view }: { view: MissionView }) {
   const pathname = usePathname();
   const [identity, setIdentity] = useState<Identity | null>(null);
   const [loading, setLoading] = useState(true);
+  const [health, setHealth] = useState<SystemHealth | null>(null);
+  const [healthReachable, setHealthReachable] = useState(true);
 
   useEffect(() => {
     fetch("/api/session", { cache: "no-store" })
       .then(async (response) => response.ok ? setIdentity(await response.json()) : setIdentity(null))
       .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadHealth() {
+      try {
+        const response = await fetch("/api/backend/health/ready", { cache: "no-store" });
+        const payload = await response.json();
+        const valid = payload && typeof payload === "object" && "status" in payload && "checks" in payload;
+        if (cancelled) return;
+        if (valid) {
+          setHealth(payload as SystemHealth);
+          setHealthReachable(true);
+        } else {
+          setHealth(null);
+          setHealthReachable(false);
+        }
+      } catch {
+        if (!cancelled) {
+          setHealth(null);
+          setHealthReachable(false);
+        }
+      }
+    }
+
+    void loadHealth();
+    const timer = window.setInterval(() => void loadHealth(), 15_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, []);
 
   async function logout() {
@@ -112,6 +183,10 @@ export function MissionControl({ view }: { view: MissionView }) {
   if (!permitted.some((item) => item.view === view)) {
     return <main className="grid min-h-screen place-items-center"><div className="tm-panel rounded-2xl p-8 text-center"><ShieldCheck className="mx-auto mb-3 size-6 text-amber-300"/><h1 className="font-semibold">Insufficient role</h1><p className="mt-2 text-sm text-slate-500">This console requires elevated TractusMind access.</p><Link href="/"><Button className="mt-5">Back to copilot</Button></Link></div></main>;
   }
+
+  const healthState = !healthReachable ? "offline" : health?.status ?? "checking";
+  const healthBadgeClass = healthState === "ok" ? "text-emerald-300" : healthState === "degraded" ? "text-amber-300" : healthState === "offline" ? "text-red-300" : "text-cyan-300";
+  const healthLedClass = healthState === "degraded" ? "amber" : healthState === "offline" ? "red" : healthState === "checking" ? "cyan" : "";
 
   return (
     <main className="h-screen overflow-hidden p-2 sm:p-3">
@@ -130,10 +205,7 @@ export function MissionControl({ view }: { view: MissionView }) {
             })}
           </nav>
           <div className="mt-auto space-y-3 px-1">
-            <div className="tm-well rounded-xl p-3">
-              <div className="flex items-center gap-2"><span className="tm-led"/><span className="tm-label">Core online</span></div>
-              <div className="mt-3 grid grid-cols-2 gap-2 text-[10px] text-slate-600"><span>RAG</span><span className="text-right text-slate-400">armed</span><span>Guard</span><span className="text-right text-slate-400">strict</span><span>Trace</span><span className="text-right text-slate-400">live</span></div>
-            </div>
+            <HealthPanel health={health} reachable={healthReachable}/>
             <div className="flex items-center gap-2 px-2 py-1">
               <div className="grid size-8 place-items-center rounded-lg border border-white/8 bg-white/5 text-[11px] font-bold text-cyan-200">{identity.display_name.slice(0,2).toUpperCase()}</div>
               <div className="min-w-0 flex-1"><div className="truncate text-xs font-semibold">{identity.display_name}</div><div className="tm-label mt-1">{identity.role} · {identity.auth_type}</div></div>
@@ -144,7 +216,7 @@ export function MissionControl({ view }: { view: MissionView }) {
         <section className="flex min-w-0 flex-1 flex-col p-1 sm:p-2">
           <header className="mb-2 flex h-11 items-center justify-between px-2 sm:px-3">
             <div className="flex items-center gap-3"><span className="tm-label">{view === "chat" ? "copilot channel" : `${view} console`}</span><span className="hidden h-3 w-px bg-white/8 sm:block"/><span className="hidden text-[10px] text-slate-600 sm:block">source-grounded · version-aware · inspectable</span></div>
-            <div className="flex items-center gap-2"><Badge className="hidden sm:inline-flex"><Activity className="size-3"/> production</Badge><Badge className="text-emerald-300"><span className="tm-led"/> connected</Badge></div>
+            <div className="flex items-center gap-2"><Badge className={cn("hidden sm:inline-flex", healthBadgeClass)}><Activity className="size-3"/><span className={`tm-led ${healthLedClass}`}/> core {healthState}</Badge><Badge className="text-emerald-300"><span className="tm-led"/> connected</Badge></div>
           </header>
           {view === "chat" ? <ChatWorkbench /> : <DataDeck view={view} identity={identity} />}
           <nav className="mt-2 flex gap-1 overflow-x-auto px-1 md:hidden">
