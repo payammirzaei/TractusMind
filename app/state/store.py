@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.ingestion.models import SourceManifest
@@ -22,6 +22,39 @@ class StoredSourceFile:
     content_commit_sha: str
     size_bytes: int
     content_type: str
+
+
+@dataclass(frozen=True)
+class SourceStatusRecord:
+    source_id: str
+    repository: str
+    component: str
+    version_ref: str
+    snapshot_commit_sha: str
+    last_successful_run_id: str | None
+    updated_at: datetime
+    file_count: int
+
+
+@dataclass(frozen=True)
+class IngestionRunRecord:
+    run_id: str
+    source_id: str
+    repository: str
+    requested_ref: str
+    snapshot_commit_sha: str
+    status: str
+    discovered_count: int
+    added_count: int
+    modified_count: int
+    deleted_count: int
+    unchanged_count: int
+    fetched_count: int
+    chunk_count: int
+    indexed_count: int
+    error_message: str | None
+    started_at: datetime
+    finished_at: datetime | None
 
 
 class SourceStateStore:
@@ -66,6 +99,71 @@ class SourceStateStore:
             )
             for row in rows
         }
+
+    async def list_source_statuses(self) -> list[SourceStatusRecord]:
+        async with self.sessions() as session:
+            sources = (
+                await session.scalars(select(SourceState).order_by(SourceState.source_id))
+            ).all()
+            count_rows = (
+                await session.execute(
+                    select(
+                        SourceFileState.source_id,
+                        func.count(SourceFileState.path),
+                    ).group_by(SourceFileState.source_id)
+                )
+            ).all()
+        file_counts = {source_id: int(count) for source_id, count in count_rows}
+        return [
+            SourceStatusRecord(
+                source_id=row.source_id,
+                repository=row.repository,
+                component=row.component,
+                version_ref=row.version_ref,
+                snapshot_commit_sha=row.snapshot_commit_sha,
+                last_successful_run_id=row.last_successful_run_id,
+                updated_at=row.updated_at,
+                file_count=file_counts.get(row.source_id, 0),
+            )
+            for row in sources
+        ]
+
+    async def get_source_status(self, source_id: str) -> SourceStatusRecord | None:
+        statuses = await self.list_source_statuses()
+        return next((item for item in statuses if item.source_id == source_id), None)
+
+    async def list_runs(
+        self,
+        *,
+        source_id: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[IngestionRunRecord]:
+        query = select(IngestionRun).order_by(IngestionRun.started_at.desc()).limit(limit)
+        if source_id is not None:
+            query = query.where(IngestionRun.source_id == source_id)
+        if status is not None:
+            query = query.where(IngestionRun.status == status)
+
+        async with self.sessions() as session:
+            rows = (await session.scalars(query)).all()
+        return [self._run_record(row) for row in rows]
+
+    async def get_run(self, run_id: str) -> IngestionRunRecord | None:
+        async with self.sessions() as session:
+            row = await session.get(IngestionRun, run_id)
+        return self._run_record(row) if row is not None else None
+
+    async def run_status_counts(self) -> dict[str, int]:
+        async with self.sessions() as session:
+            rows = (
+                await session.execute(
+                    select(IngestionRun.status, func.count(IngestionRun.run_id)).group_by(
+                        IngestionRun.status
+                    )
+                )
+            ).all()
+        return {status: int(count) for status, count in rows}
 
     async def start_run(self, manifest: SourceManifest) -> str:
         run = IngestionRun(
@@ -173,3 +271,24 @@ class SourceStateStore:
             run.status = "failed"
             run.error_message = message[:10_000]
             run.finished_at = datetime.now(UTC)
+
+    def _run_record(self, row: IngestionRun) -> IngestionRunRecord:
+        return IngestionRunRecord(
+            run_id=row.run_id,
+            source_id=row.source_id,
+            repository=row.repository,
+            requested_ref=row.requested_ref,
+            snapshot_commit_sha=row.snapshot_commit_sha,
+            status=row.status,
+            discovered_count=row.discovered_count,
+            added_count=row.added_count,
+            modified_count=row.modified_count,
+            deleted_count=row.deleted_count,
+            unchanged_count=row.unchanged_count,
+            fetched_count=row.fetched_count,
+            chunk_count=row.chunk_count,
+            indexed_count=row.indexed_count,
+            error_message=row.error_message,
+            started_at=row.started_at,
+            finished_at=row.finished_at,
+        )
