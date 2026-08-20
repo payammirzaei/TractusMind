@@ -10,6 +10,13 @@ async function body(response) {
   try { return JSON.parse(text); } catch { return text; }
 }
 
+async function authenticatedGet(path, cookie) {
+  const response = await fetch(`${baseUrl}${path}`, { headers: { cookie }, cache: "no-store" });
+  const payload = await body(response);
+  assert(response.status === 200, `${path} returned ${response.status}: ${JSON.stringify(payload)}`);
+  return payload;
+}
+
 const crossSite = await fetch(`${baseUrl}/api/session`, {
   method: "POST",
   headers: {
@@ -46,16 +53,42 @@ assert(me.status === 200, `session read returned ${me.status}`);
 assert(mePayload.display_name === "CI Admin", "session identity did not survive cookie round-trip");
 process.stdout.write("ok session identity round-trip\n");
 
-const summary = await fetch(`${baseUrl}/api/backend/v1/ops/summary`, { headers: { cookie }, cache: "no-store" });
-const summaryPayload = await body(summary);
-assert(summary.status === 200, `ops proxy returned ${summary.status}: ${JSON.stringify(summaryPayload)}`);
-assert(summaryPayload.indexed_sources === 1, "ops proxy payload was not forwarded");
-process.stdout.write("ok authenticated backend GET proxy\n");
+const summaryPayload = await authenticatedGet("/api/backend/v1/ops/summary", cookie);
+assert(summaryPayload.indexed_sources === 1, "ops summary payload was not forwarded");
+process.stdout.write("ok ops summary contract\n");
+
+const sourcesPayload = await authenticatedGet("/api/backend/v1/ops/sources", cookie);
+assert(Array.isArray(sourcesPayload) && sourcesPayload[0]?.source_id === "tractusx-sdk", "sources contract was not forwarded");
+process.stdout.write("ok source fleet contract\n");
+
+const runsPayload = await authenticatedGet("/api/backend/v1/ops/runs?limit=24", cookie);
+assert(Array.isArray(runsPayload), "runs contract was not forwarded");
+process.stdout.write("ok ingestion runs contract\n");
+
+const qualitySummary = await authenticatedGet("/api/backend/v1/ops/quality/summary", cookie);
+assert(qualitySummary.regression_cases === 1, "quality summary contract was not forwarded");
+process.stdout.write("ok quality summary contract\n");
+
+const qualityReviews = await authenticatedGet("/api/backend/v1/ops/quality/reviews?limit=8", cookie);
+assert(Array.isArray(qualityReviews), "quality reviews contract was not forwarded");
+process.stdout.write("ok quality review contract\n");
 
 const health = await fetch(`${baseUrl}/api/backend/health/ready`, { cache: "no-store" });
 const healthPayload = await body(health);
 assert(health.status === 200 && healthPayload.checks?.qdrant === "ok", "health proxy did not forward readiness payload");
 process.stdout.write("ok unauthenticated health proxy\n");
+
+const anonymousOps = await fetch(`${baseUrl}/api/backend/v1/ops/summary`, { cache: "no-store" });
+assert(anonymousOps.status === 401, `anonymous ops proxy returned ${anonymousOps.status}`);
+process.stdout.write("ok anonymous ops request rejected upstream\n");
+
+const blockedPath = await fetch(`${baseUrl}/api/backend/v1/internal/secrets`, { headers: { cookie }, cache: "no-store" });
+assert(blockedPath.status === 404, `unsupported backend path returned ${blockedPath.status}`);
+process.stdout.write("ok backend proxy allowlist enforced\n");
+
+const blockedHealthMutation = await fetch(`${baseUrl}/api/backend/health/ready`, { method: "POST", headers: { cookie } });
+assert(blockedHealthMutation.status === 405, `health mutation returned ${blockedHealthMutation.status}`);
+process.stdout.write("ok health proxy remains read-only\n");
 
 const blockedMutation = await fetch(`${baseUrl}/api/backend/v1/ops/sync`, {
   method: "POST",
