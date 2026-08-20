@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
@@ -156,11 +156,11 @@ async def source_status(source_id: str, request: Request) -> SourceOpsStatus:
 async def runs(
     request: Request,
     source_id: str | None = None,
-    run_status: Literal["running", "succeeded", "failed"] | None = Query(
-        default=None,
-        alias="status",
-    ),
-    limit: int = Query(default=50, ge=1, le=200),
+    run_status: Annotated[
+        Literal["running", "succeeded", "failed"] | None,
+        Query(alias="status"),
+    ] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> list[RunOpsStatus]:
     store = await _store(request)
     records = await store.list_runs(
