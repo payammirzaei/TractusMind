@@ -4,8 +4,9 @@ from datetime import UTC, datetime
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
+from app.db import verify_database_revision
 from app.ingestion.models import SourceManifest
-from app.state.models import Base, IngestionRun, SourceFileState, SourceState
+from app.state.models import IngestionRun, SourceFileState, SourceState
 
 
 @dataclass(frozen=True)
@@ -63,10 +64,13 @@ class SourceStateStore:
     def __init__(self, engine: AsyncEngine) -> None:
         self.engine = engine
         self.sessions = async_sessionmaker(engine, expire_on_commit=False)
+        self._schema_ready = False
 
     async def ensure_schema(self) -> None:
-        async with self.engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
+        if self._schema_ready:
+            return
+        await verify_database_revision(self.engine)
+        self._schema_ready = True
 
     async def load_source_snapshot(
         self,
