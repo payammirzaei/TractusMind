@@ -9,6 +9,13 @@ from app.state.models import Base, IngestionRun, SourceFileState, SourceState
 
 
 @dataclass(frozen=True)
+class StoredSourceSnapshot:
+    source_id: str
+    version_ref: str
+    snapshot_commit_sha: str
+
+
+@dataclass(frozen=True)
 class StoredSourceFile:
     path: str
     blob_sha: str
@@ -27,6 +34,20 @@ class SourceStateStore:
     async def ensure_schema(self) -> None:
         async with self.engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
+
+    async def load_source_snapshot(
+        self,
+        source_id: str,
+    ) -> StoredSourceSnapshot | None:
+        async with self.sessions() as session:
+            row = await session.get(SourceState, source_id)
+        if row is None:
+            return None
+        return StoredSourceSnapshot(
+            source_id=row.source_id,
+            version_ref=row.version_ref,
+            snapshot_commit_sha=row.snapshot_commit_sha,
+        )
 
     async def load_file_states(self, source_id: str) -> dict[str, StoredSourceFile]:
         async with self.sessions() as session:
