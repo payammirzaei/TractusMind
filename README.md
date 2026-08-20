@@ -11,6 +11,7 @@ The project intentionally starts with retrieval quality and evaluation before UI
 - Python 3.12
 - FastAPI
 - Qdrant for dense + sparse retrieval
+- FastEmbed + BAAI/bge-small-en-v1.5 for the dense baseline
 - PostgreSQL for application and ingestion state
 - Redis + Dramatiq for background ingestion jobs
 - Tree-sitter for AST-aware source-code chunking
@@ -42,7 +43,7 @@ pytest -q
 ruff check .
 ```
 
-## Source discovery, fetching, and chunking
+## Source discovery, fetching, chunking, and dense indexing
 
 Official Tractus-X sources are allowlisted in `config/sources.toml`. Discovery resolves every repository ref to an immutable commit SHA before any content is fetched.
 
@@ -56,8 +57,14 @@ tractusmind-ingest fetch tractusx-sdk --limit 3
 # Fetch and smart-chunk three files, printing only traceability metadata
 tractusmind-ingest chunk tractusx-sdk --limit 3
 
-# Discover all enabled sources with the original inspection script
-python scripts/discover_sources.py
+# Smoke-index a small subset without cleaning previous source versions
+tractusmind-ingest index tractusx-sdk --limit 10
+
+# Full source index; after a successful upsert, stale commits for this source are removed
+tractusmind-ingest index tractusx-sdk
+
+# Retrieve real source chunks from Qdrant
+tractusmind-ingest search "How do I create an asset with the Tractus-X SDK?" --limit 5
 ```
 
 Fetched files become canonical `RawDocument` objects containing a stable document ID, repository, commit SHA, blob SHA, language/content type, SHA-256 content hash, normalized UTF-8 text, and a source URL pinned to the exact commit.
@@ -70,6 +77,11 @@ Smart chunking keeps retrieval units source-traceable:
 - YAML is chunked by top-level configuration keys.
 - Turtle/SAMM content is chunked by semantic statements while retaining prefix context.
 - Every chunk carries exact source line ranges and a commit-pinned citation URL.
+- Chunk budgets are conservative for the 512-token BGE-small input window to reduce silent embedding truncation.
+
+Dense indexing enriches the embedding input with repository, component, path, language, section, and code-symbol context while preserving the original source text unchanged in Qdrant payloads. FastEmbed uses passage embeddings for indexed chunks and query embeddings for user searches.
+
+The first fixed retrieval seed is stored in `benchmarks/dense_v0.jsonl`. Relevance thresholds are intentionally unset until they are calibrated on measured Tractus-X retrieval results rather than guessed from raw cosine scores.
 
 `GITHUB_TOKEN` is optional for public repositories, but recommended to avoid low unauthenticated API rate limits.
 
@@ -95,7 +107,7 @@ See [`docs/architecture.md`](docs/architecture.md) for the current architecture 
 
 ## Current milestone
 
-**V0 — Foundation / Source Ingestion / Smart Chunking**
+**V0 — Dense Retrieval Baseline**
 
 - [x] FastAPI service shell
 - [x] Qdrant/PostgreSQL/Redis connectivity contract
@@ -113,8 +125,15 @@ See [`docs/architecture.md`](docs/architecture.md) for the current architecture 
 - [x] Tree-sitter code symbol chunking
 - [x] YAML/Turtle structure-aware chunking
 - [x] Stable KnowledgeChunk IDs + exact source line ranges
-- [ ] embedding generation + Qdrant indexing
-- [ ] first dense retrieval benchmark
+- [x] FastEmbed dense embedding generation
+- [x] Named dense vector collection in Qdrant
+- [x] Metadata-rich Qdrant payloads + payload indexes
+- [x] Safe stale-commit cleanup after full source reindex
+- [x] Dense search CLI with scores and exact citations
+- [x] First fixed dense retrieval benchmark seed
+- [ ] benchmark runner + Recall@K/MRR/NDCG report
+- [ ] sparse BM25 retrieval + hybrid fusion
+- [ ] cross-encoder reranking
 
 ## License
 
