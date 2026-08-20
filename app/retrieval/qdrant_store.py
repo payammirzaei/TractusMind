@@ -1,3 +1,4 @@
+import hashlib
 import uuid
 from collections.abc import Sequence
 
@@ -7,6 +8,11 @@ from app.chunking.models import KnowledgeChunk
 from app.retrieval.models import RetrievalHit
 
 DENSE_VECTOR_NAME = "dense"
+
+
+def model_scoped_collection_name(base_name: str, embedding_model: str) -> str:
+    model_hash = hashlib.sha256(embedding_model.encode("utf-8")).hexdigest()[:12]
+    return f"{base_name}__{model_hash}"
 
 
 class QdrantKnowledgeStore:
