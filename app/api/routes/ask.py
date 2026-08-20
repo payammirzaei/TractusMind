@@ -39,6 +39,7 @@ async def ask(payload: AskRequest, request: Request) -> GroundedAnswer:
         request.app.state.answer_service = service
 
     conversation_id = str(payload.conversation_id) if payload.conversation_id else None
+    request_id = getattr(request.state, "request_id", None)
     started = perf_counter()
     token = begin_answer_trace()
     try:
@@ -49,6 +50,7 @@ async def ask(payload: AskRequest, request: Request) -> GroundedAnswer:
             token=token,
             question=payload.question,
             conversation_id=conversation_id,
+            request_id=request_id,
             error=exc,
             started=started,
         )
@@ -59,6 +61,7 @@ async def ask(payload: AskRequest, request: Request) -> GroundedAnswer:
             token=token,
             question=payload.question,
             conversation_id=conversation_id,
+            request_id=request_id,
             error=exc,
             started=started,
         )
@@ -67,9 +70,10 @@ async def ask(payload: AskRequest, request: Request) -> GroundedAnswer:
     trace = finish_answer_trace(token)
     try:
         identity = await request.app.state.conversation_store.record_answer(
-            question=payload.question,
+            question=answer.question,
             answer=answer,
             conversation_id=conversation_id,
+            request_id=request_id,
             stage_durations=trace.stage_durations,
             total_duration_seconds=perf_counter() - started,
             trace_id=current_trace_id(),
@@ -92,6 +96,7 @@ async def _finish_and_persist_failure(
     token: Token,
     question: str,
     conversation_id: str | None,
+    request_id: str | None,
     error: Exception,
     started: float,
 ) -> None:
@@ -105,8 +110,9 @@ async def _finish_and_persist_failure(
 
     try:
         await request.app.state.conversation_store.record_failure(
-            question=question,
+            question=question.strip(),
             conversation_id=conversation_id,
+            request_id=request_id,
             error_type=type(error).__name__,
             stage_durations=trace.stage_durations,
             total_duration_seconds=perf_counter() - started,
