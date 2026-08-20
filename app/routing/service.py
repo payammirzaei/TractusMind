@@ -192,7 +192,11 @@ class QueryRouter:
         return f" {normalized} "
 
     def _contains_any(self, text: str, terms: tuple[str, ...]) -> bool:
-        return any(self._normalize_for_matching(term).strip() in text for term in terms)
+        for term in terms:
+            needle = self._normalize_for_matching(term).strip()
+            if f" {needle} " in text:
+                return True
+        return False
 
     def _extend(self, values: list[str], *items: str) -> None:
         for item in items:
