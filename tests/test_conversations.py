@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 
 from app.api.routes.ask import router as ask_router
 from app.api.routes.feedback import router as feedback_router
+from app.conversations.history import ConversationTurn
 from app.conversations.store import FeedbackRecord, InteractionIdentity
 from app.generation.llm import LLMGenerationError
 from app.generation.models import GroundedAnswer
@@ -17,7 +18,13 @@ _FEEDBACK_ID = "33333333-3333-4333-8333-333333333333"
 
 
 class FakeAnswerService:
-    async def answer(self, question: str) -> GroundedAnswer:
+    async def answer(
+        self,
+        question: str,
+        *,
+        history: list[ConversationTurn] | None = None,
+    ) -> GroundedAnswer:
+        assert history == []
         with observe_stage("retrieval", "sdk"):
             pass
         return GroundedAnswer(
@@ -32,7 +39,13 @@ class FakeAnswerService:
 
 
 class FailingAnswerService:
-    async def answer(self, _question: str) -> GroundedAnswer:
+    async def answer(
+        self,
+        _question: str,
+        *,
+        history: list[ConversationTurn] | None = None,
+    ) -> GroundedAnswer:
+        assert history == []
         record_trace_metadata("intent", "sdk")
         record_trace_metadata("model", "test-model")
         record_trace_metadata("route", {"intent": "sdk"})
@@ -46,7 +59,14 @@ class FakeConversationStore:
     def __init__(self) -> None:
         self.answer_kwargs: dict[str, object] | None = None
         self.failure_kwargs: dict[str, object] | None = None
+        self.feedback_kwargs: dict[str, object] | None = None
         self.feedback_exists = True
+
+    async def assert_conversation_access(self, **_kwargs) -> bool:
+        return True
+
+    async def load_history(self, **_kwargs) -> list[ConversationTurn]:
+        return []
 
     async def record_answer(self, **kwargs) -> InteractionIdentity:
         self.answer_kwargs = kwargs
@@ -63,6 +83,7 @@ class FakeConversationStore:
         )
 
     async def upsert_feedback(self, **kwargs) -> FeedbackRecord | None:
+        self.feedback_kwargs = kwargs
         if not self.feedback_exists:
             return None
         return FeedbackRecord(
@@ -111,6 +132,7 @@ def test_ask_persists_trace_and_returns_conversation_identity() -> None:
     assert payload["interaction_id"] == _INTERACTION_ID
     assert payload["conversation_id"] == _CONVERSATION_ID
     assert store.answer_kwargs is not None
+    assert store.answer_kwargs["owner_user_id"] is None
     assert store.answer_kwargs["request_id"] == response.headers["X-Request-ID"]
     durations = store.answer_kwargs["stage_durations"]
     assert isinstance(durations, dict)
@@ -128,6 +150,7 @@ def test_generation_failure_is_persisted_before_http_error() -> None:
 
     assert response.status_code == 502
     assert store.failure_kwargs is not None
+    assert store.failure_kwargs["owner_user_id"] is None
     assert store.failure_kwargs["request_id"] == response.headers["X-Request-ID"]
     assert store.failure_kwargs["error_type"] == "LLMGenerationError"
     assert store.failure_kwargs["intent"] == "sdk"
@@ -141,7 +164,7 @@ def test_generation_failure_is_persisted_before_http_error() -> None:
 
 
 def test_feedback_endpoint_upserts_completed_interaction_feedback() -> None:
-    app, _store = _app(FakeAnswerService())
+    app, store = _app(FakeAnswerService())
 
     response = TestClient(app).post(
         "/v1/feedback",
@@ -156,6 +179,8 @@ def test_feedback_endpoint_upserts_completed_interaction_feedback() -> None:
     assert response.status_code == 200
     assert response.json()["feedback_id"] == _FEEDBACK_ID
     assert response.json()["rating"] == "down"
+    assert store.feedback_kwargs is not None
+    assert store.feedback_kwargs["actor_user_id"] is None
     assert app.state.quality_store.reviews == [(_INTERACTION_ID, "feedback_down")]
 
 
