@@ -27,7 +27,7 @@ def build_route_filter(route: QueryRoute | None) -> models.Filter | None:
     if route.commit_sha:
         must.append(
             models.FieldCondition(
-                key="commit_sha",
+                key="snapshot_commit_sha",
                 match=models.MatchValue(value=route.commit_sha),
             )
         )
