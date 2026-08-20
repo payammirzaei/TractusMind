@@ -1,7 +1,9 @@
+from collections.abc import Sequence
+
 from app.ingestion.content import GitHubContentFetcher
 from app.ingestion.github import GitHubSourceScanner
 from app.ingestion.github_client import GitHubApiClient, GitHubSourceError
-from app.ingestion.models import RawDocument, SourceDefinition, SourceManifest
+from app.ingestion.models import RawDocument, SourceDefinition, SourceFile, SourceManifest
 
 
 class SourceIngestionPipeline:
@@ -35,6 +37,13 @@ class SourceIngestionPipeline:
                 f"{manifest.repository}; refusing incomplete ingestion"
             )
         return manifest
+
+    async def fetch_files(
+        self,
+        manifest: SourceManifest,
+        files: Sequence[SourceFile],
+    ) -> list[RawDocument]:
+        return await self._fetcher.fetch_selected(manifest, files)
 
     async def fetch(
         self,
