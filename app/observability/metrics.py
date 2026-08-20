@@ -38,7 +38,7 @@ RETRIEVAL_RESULTS = Histogram(
 )
 MODEL_LOAD_DURATION = Histogram(
     "tractusmind_model_load_duration_seconds",
-    "Lazy model initialization duration.",
+    "First-use local model warm-up duration, including lazy initialization.",
     ("role",),
 )
 MODEL_LOADED = Gauge(
@@ -82,7 +82,7 @@ WORKER_JOBS = Counter(
 )
 QUEUE_ENQUEUED = Counter(
     "tractusmind_queue_enqueued_total",
-    "Source sync jobs enqueued through scheduler, API, or CLI.",
+    "Source sync jobs enqueued by instrumented control paths.",
     ("origin",),
 )
 
