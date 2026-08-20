@@ -7,6 +7,7 @@ def build_embedding_text(chunk: KnowledgeChunk) -> str:
     context: list[str] = [
         f"Repository: {chunk.repository}",
         f"Component: {chunk.component}",
+        f"Version ref: {chunk.version_ref}",
         f"Path: {chunk.path}",
     ]
 
@@ -25,7 +26,12 @@ def build_embedding_text(chunk: KnowledgeChunk) -> str:
 def build_sparse_text(chunk: KnowledgeChunk) -> str:
     """Favor exact identifiers, paths, headings, and source tokens for lexical retrieval."""
 
-    identifiers = [chunk.repository, chunk.component, chunk.path]
+    identifiers = [
+        chunk.repository,
+        chunk.component,
+        chunk.version_ref,
+        chunk.path,
+    ]
     if chunk.language:
         identifiers.append(chunk.language)
     identifiers.extend(chunk.section_path)
