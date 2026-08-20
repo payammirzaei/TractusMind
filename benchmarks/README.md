@@ -1,14 +1,22 @@
 # TractusMind Benchmarks
 
-This directory will contain the fixed evaluation set used to prevent retrieval regressions.
+This directory contains fixed evaluation sets used to prevent retrieval regressions.
 
-Planned categories:
+Current categories include:
 
 - Tractus-X concepts
 - EDC coding and configuration
-- Debugging and exact error lookup
+- Debugging and exact identifier lookup
 - Architecture and dataspace flows
 - Semantic Models / SAMM
 - Version-specific questions
 
-The benchmark will track retrieval metrics such as Recall@K, MRR, and NDCG as well as citation correctness and answer groundedness.
+`dense_v0.jsonl` is the first retrieval seed. Each case declares the expected source IDs and optional terms that must appear in the same returned chunk.
+
+Run the same indexed hybrid collection through both retrieval modes:
+
+```bash
+tractusmind-benchmark --mode both --k 5
+```
+
+The current runner reports Recall@K/evidence hit rate, MRR, NDCG@K, first relevant rank, and the top source IDs for every question. Future evaluation layers will add reranker comparisons, citation correctness, answer groundedness, and version correctness.
