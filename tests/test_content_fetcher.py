@@ -25,7 +25,7 @@ async def test_fetch_document_is_pinned_and_traceable() -> None:
         source_id="tractusx-sdk",
         repository="eclipse-tractusx/tractusx-sdk",
         component="sdk",
-        requested_ref="main",
+        requested_ref="v0.9.0",
         commit_sha="abc123",
         archived=False,
         files=[],
@@ -42,6 +42,7 @@ async def test_fetch_document_is_pinned_and_traceable() -> None:
     document = await fetcher.fetch_document(manifest, source_file)
 
     assert document.repository == "eclipse-tractusx/tractusx-sdk"
+    assert document.version_ref == "v0.9.0"
     assert document.commit_sha == "abc123"
     assert document.blob_sha == "blob456"
     assert document.language == "python"
