@@ -7,6 +7,7 @@ from app.generation.context import GroundedContext, build_grounded_context
 from app.generation.llm import LLMGenerationError, LLMProvider
 from app.generation.models import GroundedAnswer, LLMAnswerPayload, VerificationReport
 from app.generation.verification import ClaimVerifier
+from app.observability.metrics import ANSWERS, RETRIEVAL_RESULTS, observe_stage
 from app.retrieval.reranked import RerankedRetrievalService
 from app.routing.models import QueryRoute
 from app.routing.service import QueryRouter
@@ -57,11 +58,15 @@ class GroundedAnswerService:
             raise ValueError("Question must not be empty")
 
         route = self.router.route(normalized)
-        hits = await self.retrieval.search(
-            normalized,
-            limit=self.evidence_limit,
-            route=route,
-        )
+        intent = route.intent.value
+        with observe_stage("retrieval", intent):
+            hits = await self.retrieval.search(
+                normalized,
+                limit=self.evidence_limit,
+                route=route,
+            )
+        RETRIEVAL_RESULTS.labels(intent=intent).observe(len(hits))
+
         if self.minimum_rerank_score is not None:
             hits = [
                 hit
@@ -72,14 +77,18 @@ class GroundedAnswerService:
 
         context = build_grounded_context(hits, max_chars=self.context_max_chars)
         if not context.blocks:
+            ANSWERS.labels(intent=intent, outcome="abstained_no_evidence").inc()
             return self._abstain(normalized, evidence_count=0, route=route)
 
-        raw = await self.llm.complete(
-            _SYSTEM_PROMPT,
-            self._user_prompt(normalized, context),
-        )
-        payload = self._parse_payload(raw)
+        with observe_stage("generation", intent):
+            raw = await self.llm.complete(
+                _SYSTEM_PROMPT,
+                self._user_prompt(normalized, context),
+            )
+            payload = self._parse_payload(raw)
+
         if not payload.grounded:
+            ANSWERS.labels(intent=intent, outcome="abstained_model").inc()
             return GroundedAnswer(
                 question=normalized,
                 answer=payload.answer,
@@ -105,18 +114,21 @@ class GroundedAnswerService:
             if citation_id not in citation_map
         ]
         if invalid_ids or declared_invalid or not cited_ids or declared_ids != inline_ids:
+            ANSWERS.labels(intent=intent, outcome="abstained_citation_gate").inc()
             return self._abstain(
                 normalized,
                 evidence_count=len(context.blocks),
                 route=route,
             )
 
-        verification = await self.verifier.verify(
-            question=normalized,
-            answer=payload.answer,
-            context=context,
-        )
+        with observe_stage("verification", intent):
+            verification = await self.verifier.verify(
+                question=normalized,
+                answer=payload.answer,
+                context=context,
+            )
         if not verification.passed:
+            ANSWERS.labels(intent=intent, outcome="abstained_verification").inc()
             return self._abstain(
                 normalized,
                 evidence_count=len(context.blocks),
@@ -125,6 +137,7 @@ class GroundedAnswerService:
             )
 
         ordered_ids = list(dict.fromkeys(cited_ids))
+        ANSWERS.labels(intent=intent, outcome="grounded").inc()
         return GroundedAnswer(
             question=normalized,
             answer=payload.answer,
