@@ -64,16 +64,18 @@ _VERSION_PATTERNS = (
 _REF_RE = re.compile(r"\bref\s*[:=]\s*([A-Za-z0-9._/-]+)", re.I)
 _COMMIT_RE = re.compile(r"\bcommit\s*[:=]\s*([0-9a-f]{7,40})\b", re.I)
 _HTTP_ERROR_RE = re.compile(r"\b(?:4\d\d|5\d\d)\b")
+_MATCHING_PUNCTUATION_RE = re.compile(r"[^\w./-]+", re.UNICODE)
+_WHITESPACE_RE = re.compile(r"\s+")
 
 
 class QueryRouter:
     """Route Tractus-X queries without adding an LLM call to retrieval."""
 
     def route(self, query: str) -> QueryRoute:
-        normalized = f" {query.strip().casefold()} "
         if not query.strip():
             raise ValueError("Query must not be empty")
 
+        normalized = self._normalize_for_matching(query)
         sdk = self._contains_any(normalized, _SDK_TERMS)
         edc = self._contains_any(normalized, _EDC_TERMS)
         dtr = self._contains_any(normalized, _DTR_TERMS)
@@ -184,8 +186,13 @@ class QueryRouter:
         match = pattern.search(query)
         return match.group(1) if match else None
 
+    def _normalize_for_matching(self, text: str) -> str:
+        normalized = _MATCHING_PUNCTUATION_RE.sub(" ", text.casefold())
+        normalized = _WHITESPACE_RE.sub(" ", normalized).strip()
+        return f" {normalized} "
+
     def _contains_any(self, text: str, terms: tuple[str, ...]) -> bool:
-        return any(term in text for term in terms)
+        return any(self._normalize_for_matching(term).strip() in text for term in terms)
 
     def _extend(self, values: list[str], *items: str) -> None:
         for item in items:
