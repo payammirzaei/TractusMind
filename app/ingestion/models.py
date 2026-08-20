@@ -45,3 +45,21 @@ class SourceManifest(BaseModel):
     archived: bool
     files: list[SourceFile]
     tree_truncated: bool = False
+
+
+class RawDocument(BaseModel):
+    """Canonical, immutable source document fetched from a pinned repository commit."""
+
+    document_id: str
+    source_id: str
+    repository: str
+    component: str
+    commit_sha: str
+    path: str
+    blob_sha: str
+    content_type: str
+    language: str | None = None
+    content: str
+    content_sha256: str
+    source_url: str
+    size_bytes: int = Field(ge=0)
