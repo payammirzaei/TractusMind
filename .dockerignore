@@ -5,5 +5,11 @@ __pycache__
 .pytest_cache
 .ruff_cache
 .env
+.env.*
+secrets
+backups
 tests
 benchmarks
+dist
+build
+*.egg-info
