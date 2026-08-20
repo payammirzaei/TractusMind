@@ -29,6 +29,9 @@ def test_metrics_are_available_in_development(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert "tractusmind_http_requests_total" in response.text
+    assert "tractusmind_quality_review_signals_total" in response.text
+    assert "tractusmind_quality_review_decisions_total" in response.text
+    assert "tractusmind_quality_regression_promotions_total" in response.text
 
 
 def test_metrics_require_key_outside_development(monkeypatch) -> None:
