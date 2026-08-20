@@ -1,5 +1,3 @@
-from contextlib import nullcontext
-
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -19,8 +17,7 @@ _FEEDBACK_ID = "33333333-3333-4333-8333-333333333333"
 class FakeAnswerService:
     async def answer(self, question: str) -> GroundedAnswer:
         with observe_stage("retrieval", "sdk"):
-            with nullcontext():
-                pass
+            pass
         return GroundedAnswer(
             question=question,
             answer="Use the SDK evidence [S1].",
