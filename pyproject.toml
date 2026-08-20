@@ -29,6 +29,7 @@ dependencies = [
 [project.scripts]
 tractusmind-ingest = "app.ingestion.cli:main"
 tractusmind-benchmark = "app.evaluation.cli:main"
+tractusmind-answer-eval = "app.evaluation.answer_cli:main"
 
 [project.optional-dependencies]
 dev = [
