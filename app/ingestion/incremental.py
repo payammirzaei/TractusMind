@@ -20,6 +20,10 @@ class IncrementalPlan:
         return bool(self.added or self.modified or self.deleted_paths)
 
 
+def _source_file_path(source_file: SourceFile) -> str:
+    return source_file.path
+
+
 def build_incremental_plan(
     manifest: SourceManifest,
     previous: dict[str, StoredSourceFile],
@@ -40,10 +44,9 @@ def build_incremental_plan(
             unchanged.append(source_file)
 
     deleted_paths = sorted(set(previous) - set(current))
-    key = lambda source_file: source_file.path
     return IncrementalPlan(
-        added=tuple(sorted(added, key=key)),
-        modified=tuple(sorted(modified, key=key)),
+        added=tuple(sorted(added, key=_source_file_path)),
+        modified=tuple(sorted(modified, key=_source_file_path)),
         deleted_paths=tuple(deleted_paths),
-        unchanged=tuple(sorted(unchanged, key=key)),
+        unchanged=tuple(sorted(unchanged, key=_source_file_path)),
     )
