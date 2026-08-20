@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     hybrid_prefetch_k: int = Field(default=40, ge=2, le=500)
     reranker_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
     reranker_batch_size: int = Field(default=32, ge=1, le=128)
+    debug_exact_k: int = Field(default=30, ge=1, le=200)
+    debug_rrf_k: int = Field(default=60, ge=1, le=500)
+    debug_exact_weight: float = Field(default=1.5, gt=0.0, le=10.0)
+    debug_hybrid_weight: float = Field(default=1.0, gt=0.0, le=10.0)
 
     s3_endpoint_url: str | None = None
     s3_access_key_id: str | None = None
