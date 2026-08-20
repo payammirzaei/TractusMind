@@ -10,6 +10,7 @@ class RetrievalHit(BaseModel):
     source_id: str
     repository: str
     component: str
+    version_ref: str | None = None
     commit_sha: str
     path: str
     content_type: str
