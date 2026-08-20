@@ -58,7 +58,7 @@ jobs:
           TRACTUSMIND_OIDC_ISSUER_URL: http://127.0.0.1:8001
           TRACTUSMIND_OIDC_CLIENT_ID: tractusmind-ci
           TRACTUSMIND_OIDC_SCOPES: openid profile email
-          SMOKE_BASE_URL: http://127.0.0.1:3100
+          SMOKE_BASE_URL: http://localhost:3100
         run: |
           npm run mock:backend > /tmp/tractusmind-mock-backend.log 2>&1 &
           BACKEND_PID=$!
