@@ -6,6 +6,7 @@ from app.api.routes.feedback import router as feedback_router
 from app.conversations.store import FeedbackRecord, InteractionIdentity
 from app.generation.llm import LLMGenerationError
 from app.generation.models import GroundedAnswer
+from app.observability.http import observe_http_request
 from app.observability.metrics import observe_stage
 from app.observability.trace_context import record_trace_metadata
 from app.routing.models import QueryIntent, QueryRoute
@@ -80,6 +81,7 @@ def _app(service) -> tuple[FastAPI, FakeConversationStore]:
     app.state.conversation_store = store
     app.include_router(ask_router)
     app.include_router(feedback_router)
+    app.middleware("http")(observe_http_request)
     return app, store
 
 
@@ -99,6 +101,7 @@ def test_ask_persists_trace_and_returns_conversation_identity() -> None:
     assert payload["interaction_id"] == _INTERACTION_ID
     assert payload["conversation_id"] == _CONVERSATION_ID
     assert store.answer_kwargs is not None
+    assert store.answer_kwargs["request_id"] == response.headers["X-Request-ID"]
     durations = store.answer_kwargs["stage_durations"]
     assert isinstance(durations, dict)
     assert "retrieval" in durations
@@ -115,6 +118,7 @@ def test_generation_failure_is_persisted_before_http_error() -> None:
 
     assert response.status_code == 502
     assert store.failure_kwargs is not None
+    assert store.failure_kwargs["request_id"] == response.headers["X-Request-ID"]
     assert store.failure_kwargs["error_type"] == "LLMGenerationError"
     assert store.failure_kwargs["intent"] == "sdk"
     assert store.failure_kwargs["model"] == "test-model"
