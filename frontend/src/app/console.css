@@ -1,3 +1,5 @@
+.tm-led { display: inline-block; flex: 0 0 auto; }
+
 .tm-stat {
   position: relative;
   overflow: hidden;
@@ -130,11 +132,18 @@
 .tm-command-item:hover { transform: translateX(1px); }
 
 .tm-mobile-nav {
+  display: flex !important;
+  align-items: stretch;
+  overflow-x: auto;
+  scrollbar-width: none;
   border-top: 1px solid rgba(255,255,255,.045);
   background: linear-gradient(180deg, rgba(10,13,15,.2), rgba(7,9,11,.45));
 }
+.tm-mobile-nav::-webkit-scrollbar { display: none; }
 .tm-mobile-nav a {
   position: relative;
+  flex: 1 1 0;
+  min-width: 64px;
   transition: color .14s ease, background .14s ease;
 }
 .tm-mobile-nav a.is-active {
@@ -161,10 +170,30 @@ select:focus-visible {
   outline-offset: 2px;
 }
 
+@media (max-width: 900px) {
+  .tm-command {
+    width: min(660px, calc(100vw - 20px));
+    max-height: 88vh;
+    overflow-y: auto;
+  }
+  .tm-inspector { position: static !important; }
+}
+
 @media (max-width: 640px) {
   .tm-console-card { padding: 14px; }
   .tm-inspector { padding: 14px; }
   .tm-filter { padding-inline: 10px; }
   .tm-command-backdrop { padding-top: 5vh; }
   .tm-command { max-height: 90vh; overflow-y: auto; }
+  .tm-run-row { grid-template-columns: auto minmax(0,1fr); }
+  .tm-run-row > :last-child { grid-column: 2; text-align: left; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
 }
