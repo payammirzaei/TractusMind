@@ -28,7 +28,7 @@ class Conversation(Base):
     )
     owner_user_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey(UserAccount.user_id, ondelete="SET NULL"),
+        ForeignKey(f"{UserAccount.__tablename__}.user_id", ondelete="SET NULL"),
         index=True,
         nullable=True,
     )
