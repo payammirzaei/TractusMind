@@ -14,6 +14,10 @@ class OIDCAuthenticationError(RuntimeError):
     pass
 
 
+class OIDCProviderError(OIDCAuthenticationError):
+    pass
+
+
 @dataclass(frozen=True)
 class OIDCMetadata:
     issuer: str
@@ -120,15 +124,15 @@ class OIDCAuthenticator:
             issuer = discovery.get("issuer")
             jwks_uri = discovery.get("jwks_uri")
             if issuer != configured_issuer:
-                raise OIDCAuthenticationError("OIDC discovery issuer mismatch")
+                raise OIDCProviderError("OIDC discovery issuer mismatch")
             if not isinstance(jwks_uri, str) or not jwks_uri:
-                raise OIDCAuthenticationError("OIDC discovery is missing jwks_uri")
+                raise OIDCProviderError("OIDC discovery is missing jwks_uri")
             self._validate_provider_url(jwks_uri)
 
             jwks = await self._get_json(jwks_uri)
             keys = jwks.get("keys")
             if not isinstance(keys, list) or not keys:
-                raise OIDCAuthenticationError("JWKS contains no keys")
+                raise OIDCProviderError("JWKS contains no keys")
 
             self._metadata = OIDCMetadata(issuer=issuer, jwks_uri=jwks_uri)
             self._jwks = jwks
@@ -141,17 +145,17 @@ class OIDCAuthenticator:
             response.raise_for_status()
             payload = response.json()
         except (httpx.HTTPError, ValueError) as exc:
-            raise OIDCAuthenticationError("OIDC provider request failed") from exc
+            raise OIDCProviderError("OIDC provider request failed") from exc
         if not isinstance(payload, dict):
-            raise OIDCAuthenticationError("OIDC provider returned invalid JSON")
+            raise OIDCProviderError("OIDC provider returned invalid JSON")
         return payload
 
     def _validate_provider_url(self, url: str) -> None:
         parsed = httpx.URL(url)
         if parsed.scheme not in {"http", "https"} or not parsed.host:
-            raise OIDCAuthenticationError("OIDC provider URL is invalid")
+            raise OIDCProviderError("OIDC provider URL is invalid")
         if self.settings.app_env != "development" and parsed.scheme != "https":
-            raise OIDCAuthenticationError("OIDC provider URLs must use HTTPS outside development")
+            raise OIDCProviderError("OIDC provider URLs must use HTTPS outside development")
 
     @staticmethod
     def _find_key(jwks: dict[str, Any], kid: str) -> dict[str, Any] | None:
