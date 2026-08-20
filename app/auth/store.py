@@ -91,7 +91,6 @@ class AuthStore:
                 return None
             user.api_key_prefix = api_key[:12]
             user.api_key_hash = _hash_api_key(api_key)
-            user.enabled = True
             await session.flush()
             identity = self._identity(user)
         return UserCredential(user=identity, api_key=api_key)
