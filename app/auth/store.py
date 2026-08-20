@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import secrets
 from dataclasses import dataclass
+from enum import StrEnum
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
@@ -10,12 +11,31 @@ from app.auth.models import UserAccount
 from app.db import verify_database_revision
 
 
+class UserRole(StrEnum):
+    USER = "user"
+    OPERATOR = "operator"
+    ADMIN = "admin"
+
+    @property
+    def rank(self) -> int:
+        return {
+            UserRole.USER: 0,
+            UserRole.OPERATOR: 1,
+            UserRole.ADMIN: 2,
+        }[self]
+
+    def allows(self, required: "UserRole") -> bool:
+        return self.rank >= required.rank
+
+
 @dataclass(frozen=True)
 class UserIdentity:
     user_id: str
     display_name: str
-    api_key_prefix: str
+    api_key_prefix: str | None
     enabled: bool
+    role: UserRole
+    auth_type: str
 
 
 @dataclass(frozen=True)
@@ -48,12 +68,19 @@ class AuthStore:
             await verify_database_revision(self.engine)
             self._schema_ready = True
 
-    async def create_user(self, display_name: str) -> UserCredential:
+    async def create_user(
+        self,
+        display_name: str,
+        *,
+        role: UserRole = UserRole.USER,
+    ) -> UserCredential:
         await self.ensure_schema()
         api_key = _new_api_key()
         async with self.sessions.begin() as session:
             user = UserAccount(
                 display_name=display_name.strip(),
+                auth_type="api_key",
+                role=role.value,
                 api_key_prefix=api_key[:12],
                 api_key_hash=_hash_api_key(api_key),
             )
@@ -68,11 +95,50 @@ class AuthStore:
         async with self.sessions() as session:
             user = await session.scalar(
                 select(UserAccount).where(
+                    UserAccount.auth_type == "api_key",
                     UserAccount.api_key_hash == digest,
                     UserAccount.enabled.is_(True),
                 )
             )
         return self._identity(user) if user is not None else None
+
+    async def authenticate_oidc_identity(
+        self,
+        *,
+        issuer: str,
+        subject: str,
+        display_name: str,
+        role: UserRole,
+    ) -> UserIdentity | None:
+        """Create/update one trusted external identity without overriding local disable state."""
+        await self.ensure_schema()
+        async with self.sessions.begin() as session:
+            user = await session.scalar(
+                select(UserAccount).where(
+                    UserAccount.auth_type == "oidc",
+                    UserAccount.oidc_issuer == issuer,
+                    UserAccount.oidc_subject == subject,
+                )
+            )
+            if user is None:
+                user = UserAccount(
+                    display_name=display_name[:120],
+                    auth_type="oidc",
+                    role=role.value,
+                    oidc_issuer=issuer,
+                    oidc_subject=subject,
+                    api_key_prefix=None,
+                    api_key_hash=None,
+                )
+                session.add(user)
+                await session.flush()
+                return self._identity(user)
+            if not user.enabled:
+                return None
+            user.display_name = display_name[:120]
+            user.role = role.value
+            await session.flush()
+            return self._identity(user)
 
     async def list_users(self, limit: int = 200) -> list[UserIdentity]:
         await self.ensure_schema()
@@ -86,7 +152,7 @@ class AuthStore:
         api_key = _new_api_key()
         async with self.sessions.begin() as session:
             user = await session.get(UserAccount, user_id)
-            if user is None:
+            if user is None or user.auth_type != "api_key":
                 return None
             user.api_key_prefix = api_key[:12]
             user.api_key_hash = _hash_api_key(api_key)
@@ -94,16 +160,27 @@ class AuthStore:
             identity = self._identity(user)
         return UserCredential(user=identity, api_key=api_key)
 
-    async def set_enabled(self, user_id: str, enabled: bool) -> UserIdentity | None:
+    async def update_user(
+        self,
+        user_id: str,
+        *,
+        enabled: bool | None = None,
+        role: UserRole | None = None,
+    ) -> UserIdentity | None:
         await self.ensure_schema()
         async with self.sessions.begin() as session:
             user = await session.get(UserAccount, user_id)
             if user is None:
                 return None
-            user.enabled = enabled
+            if enabled is not None:
+                user.enabled = enabled
+            if role is not None:
+                user.role = role.value
             await session.flush()
-            identity = self._identity(user)
-        return identity
+            return self._identity(user)
+
+    async def set_enabled(self, user_id: str, enabled: bool) -> UserIdentity | None:
+        return await self.update_user(user_id, enabled=enabled)
 
     @staticmethod
     def _identity(user: UserAccount) -> UserIdentity:
@@ -112,4 +189,6 @@ class AuthStore:
             display_name=user.display_name,
             api_key_prefix=user.api_key_prefix,
             enabled=user.enabled,
+            role=UserRole(user.role),
+            auth_type=user.auth_type,
         )
