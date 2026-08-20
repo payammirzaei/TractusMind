@@ -3,9 +3,12 @@ import asyncio
 import json
 
 from app.chunking import SmartChunker
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
+from app.embeddings.service import DenseEmbeddingService
+from app.infra.qdrant import create_qdrant_client
 from app.ingestion.pipeline import SourceIngestionPipeline
 from app.ingestion.registry import get_source
+from app.retrieval.dense import DenseRetrievalService
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -23,13 +26,89 @@ def _parser() -> argparse.ArgumentParser:
     chunk.add_argument("source_id")
     chunk.add_argument("--limit", type=int, default=3)
 
+    index = subparsers.add_parser("index", help="Fetch, chunk, embed, and index one source")
+    index.add_argument("source_id")
+    index.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Optional smoke-test file limit. Full indexing cleans stale source versions.",
+    )
+
+    search = subparsers.add_parser("search", help="Run dense retrieval against Qdrant")
+    search.add_argument("query")
+    search.add_argument("--limit", type=int, default=5)
+
     return parser
+
+
+def _dense_service(settings: Settings):
+    qdrant = create_qdrant_client(settings)
+    embedder = DenseEmbeddingService(
+        settings.embedding_model,
+        query_prefix=settings.embedding_query_prefix,
+        batch_size=settings.embedding_batch_size,
+        device=settings.embedding_device,
+    )
+    retrieval = DenseRetrievalService(
+        qdrant=qdrant,
+        collection_name=settings.qdrant_collection,
+        embedder=embedder,
+    )
+    return qdrant, retrieval
+
+
+async def _run_search(args: argparse.Namespace, settings: Settings) -> None:
+    qdrant, retrieval = _dense_service(settings)
+    try:
+        hits = await retrieval.search(
+            args.query,
+            limit=args.limit,
+            score_threshold=settings.minimum_relevance_score,
+        )
+    finally:
+        await qdrant.close()
+
+    print(
+        json.dumps(
+            {
+                "query": args.query,
+                "result_count": len(hits),
+                "results": [
+                    {
+                        "rank": rank,
+                        "score": round(hit.score, 6),
+                        "source_id": hit.source_id,
+                        "repository": hit.repository,
+                        "component": hit.component,
+                        "path": hit.path,
+                        "kind": hit.kind,
+                        "language": hit.language,
+                        "symbol": hit.symbol,
+                        "parent_symbol": hit.parent_symbol,
+                        "section_path": hit.section_path,
+                        "commit_sha": hit.commit_sha,
+                        "start_line": hit.start_line,
+                        "end_line": hit.end_line,
+                        "source_url": hit.source_url,
+                        "preview": hit.text[:500],
+                    }
+                    for rank, hit in enumerate(hits, start=1)
+                ],
+            },
+            indent=2,
+        )
+    )
 
 
 async def _run(args: argparse.Namespace) -> None:
     settings = get_settings()
-    source = get_source(args.source_id)
 
+    if args.command == "search":
+        await _run_search(args, settings)
+        return
+
+    source = get_source(args.source_id)
     async with SourceIngestionPipeline(token=settings.github_token) as pipeline:
         if args.command == "discover":
             manifest = await pipeline.discover(source)
@@ -52,8 +131,37 @@ async def _run(args: argparse.Namespace) -> None:
 
         manifest, documents = await pipeline.fetch(source, limit=args.limit)
 
-        if args.command == "chunk":
+        if args.command in {"chunk", "index"}:
             chunks = SmartChunker().chunk_many(documents)
+
+            if args.command == "index":
+                qdrant, retrieval = _dense_service(settings)
+                try:
+                    indexed = await retrieval.index(
+                        chunks,
+                        remove_stale_source_versions=args.limit is None,
+                    )
+                finally:
+                    await qdrant.close()
+
+                print(
+                    json.dumps(
+                        {
+                            "source_id": manifest.source_id,
+                            "repository": manifest.repository,
+                            "commit_sha": manifest.commit_sha,
+                            "document_count": len(documents),
+                            "chunk_count": len(chunks),
+                            "indexed_count": indexed,
+                            "collection": settings.qdrant_collection,
+                            "embedding_model": settings.embedding_model,
+                            "full_source_index": args.limit is None,
+                        },
+                        indent=2,
+                    )
+                )
+                return
+
             print(
                 json.dumps(
                     {
