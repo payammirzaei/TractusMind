@@ -9,7 +9,9 @@
     "typecheck": "tsc --noEmit",
     "smoke": "node scripts/smoke-routes.mjs",
     "smoke:bff": "node scripts/smoke-bff.mjs",
-    "mock:backend": "node scripts/mock-backend.mjs"
+    "smoke:oidc": "node scripts/smoke-oidc.mjs",
+    "mock:backend": "node scripts/mock-backend.mjs",
+    "mock:oidc": "node scripts/mock-oidc.mjs"
   },
   "dependencies": {
     "class-variance-authority": "0.7.1",
