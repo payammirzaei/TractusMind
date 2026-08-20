@@ -24,6 +24,11 @@ def create_grounded_answer_service(
         timeout=settings.llm_timeout_seconds,
         temperature=settings.llm_temperature,
         max_tokens=settings.llm_max_tokens,
+        max_attempts=settings.llm_max_attempts,
+        retry_base_seconds=settings.provider_retry_base_seconds,
+        retry_max_seconds=settings.provider_retry_max_seconds,
+        circuit_failure_threshold=settings.provider_circuit_failure_threshold,
+        circuit_cooldown_seconds=settings.provider_circuit_cooldown_seconds,
     )
     verifier = ClaimVerifier(
         llm,
