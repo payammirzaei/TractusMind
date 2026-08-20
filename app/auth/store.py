@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.auth.models import UserAccount
-from app.state.models import Base
+from app.db import verify_database_revision
 
 
 @dataclass(frozen=True)
@@ -45,8 +45,7 @@ class AuthStore:
         async with self._schema_lock:
             if self._schema_ready:
                 return
-            async with self.engine.begin() as connection:
-                await connection.run_sync(Base.metadata.create_all)
+            await verify_database_revision(self.engine)
             self._schema_ready = True
 
     async def create_user(self, display_name: str) -> UserCredential:
