@@ -2,7 +2,7 @@ from app.chunking.models import KnowledgeChunk
 
 
 def build_embedding_text(chunk: KnowledgeChunk) -> str:
-    """Add lightweight retrieval context without polluting the stored source text."""
+    """Add semantic context for dense retrieval without mutating source text."""
 
     context: list[str] = [
         f"Repository: {chunk.repository}",
@@ -20,3 +20,18 @@ def build_embedding_text(chunk: KnowledgeChunk) -> str:
         context.append(f"Symbol: {chunk.symbol}")
 
     return "\n".join(context) + "\n\n" + chunk.text
+
+
+def build_sparse_text(chunk: KnowledgeChunk) -> str:
+    """Favor exact identifiers, paths, headings, and source tokens for lexical retrieval."""
+
+    identifiers = [chunk.repository, chunk.component, chunk.path]
+    if chunk.language:
+        identifiers.append(chunk.language)
+    identifiers.extend(chunk.section_path)
+    if chunk.parent_symbol:
+        identifiers.append(chunk.parent_symbol)
+    if chunk.symbol:
+        identifiers.append(chunk.symbol)
+
+    return "\n".join(identifiers) + "\n\n" + chunk.text
