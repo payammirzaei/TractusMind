@@ -8,6 +8,7 @@ from app.embeddings.service import DenseEmbeddingService
 from app.embeddings.sparse import SparseEmbeddingService
 from app.evaluation.benchmark import aggregate_metrics, evaluate_case, load_benchmark
 from app.infra.qdrant import create_qdrant_client
+from app.reranking.service import CrossEncoderReranker
 from app.retrieval.hybrid import HybridRetrievalService
 
 
@@ -18,14 +19,18 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("benchmarks/dense_v0.jsonl"),
     )
-    parser.add_argument("--mode", choices=("dense", "hybrid", "both"), default="both")
+    parser.add_argument(
+        "--mode",
+        choices=("dense", "hybrid", "rerank", "all"),
+        default="all",
+    )
     parser.add_argument("--k", type=int, default=5)
     return parser
 
 
-def _service(settings: Settings):
+def _services(settings: Settings):
     qdrant = create_qdrant_client(settings)
-    service = HybridRetrievalService(
+    retrieval = HybridRetrievalService(
         qdrant=qdrant,
         collection_name=settings.qdrant_collection,
         dense_embedder=DenseEmbeddingService(
@@ -37,21 +42,55 @@ def _service(settings: Settings):
             batch_size=settings.sparse_embedding_batch_size,
         ),
     )
-    return qdrant, service
+    reranker = CrossEncoderReranker(settings.reranker_model)
+    return qdrant, retrieval, reranker
 
 
-async def _run_mode(service: HybridRetrievalService, cases, mode: str, k: int, prefetch_k: int):
+async def _search_mode(
+    retrieval: HybridRetrievalService,
+    reranker: CrossEncoderReranker,
+    question: str,
+    mode: str,
+    k: int,
+    settings: Settings,
+):
+    if mode == "dense":
+        return await retrieval.search_dense(question, limit=k)
+    if mode == "hybrid":
+        return await retrieval.search_hybrid(
+            question,
+            limit=k,
+            prefetch_limit=settings.hybrid_prefetch_k,
+        )
+
+    candidate_k = max(settings.retrieval_top_k, k)
+    candidates = await retrieval.search_hybrid(
+        question,
+        limit=candidate_k,
+        prefetch_limit=max(settings.hybrid_prefetch_k, candidate_k),
+    )
+    return await reranker.rerank(question, candidates, limit=k)
+
+
+async def _run_mode(
+    retrieval: HybridRetrievalService,
+    reranker: CrossEncoderReranker,
+    cases,
+    mode: str,
+    k: int,
+    settings: Settings,
+):
     evaluations = []
     details = []
     for case in cases:
-        if mode == "dense":
-            hits = await service.search_dense(case.question, limit=k)
-        else:
-            hits = await service.search_hybrid(
-                case.question,
-                limit=k,
-                prefetch_limit=prefetch_k,
-            )
+        hits = await _search_mode(
+            retrieval,
+            reranker,
+            case.question,
+            mode,
+            k,
+            settings,
+        )
         metrics = evaluate_case(case, hits, k)
         evaluations.append(metrics)
         details.append(
@@ -59,15 +98,13 @@ async def _run_mode(service: HybridRetrievalService, cases, mode: str, k: int, p
                 "id": case.id,
                 "category": case.category,
                 "hit": bool(metrics[0]),
-                "first_relevant_rank": (
-                    next(
-                        (
-                            rank
-                            for rank, hit in enumerate(hits[:k], start=1)
-                            if evaluate_case(case, [hit], 1)[0]
-                        ),
-                        None,
-                    )
+                "first_relevant_rank": next(
+                    (
+                        rank
+                        for rank, hit in enumerate(hits[:k], start=1)
+                        if evaluate_case(case, [hit], 1)[0]
+                    ),
+                    None,
                 ),
                 "top_sources": [hit.source_id for hit in hits[:k]],
             }
@@ -88,11 +125,18 @@ async def _run_mode(service: HybridRetrievalService, cases, mode: str, k: int, p
 async def _run(args: argparse.Namespace) -> None:
     settings = get_settings()
     cases = load_benchmark(args.dataset)
-    qdrant, service = _service(settings)
-    modes = ("dense", "hybrid") if args.mode == "both" else (args.mode,)
+    qdrant, retrieval, reranker = _services(settings)
+    modes = ("dense", "hybrid", "rerank") if args.mode == "all" else (args.mode,)
     try:
         reports = [
-            await _run_mode(service, cases, mode, args.k, settings.hybrid_prefetch_k)
+            await _run_mode(
+                retrieval,
+                reranker,
+                cases,
+                mode,
+                args.k,
+                settings,
+            )
             for mode in modes
         ]
     finally:
@@ -104,6 +148,8 @@ async def _run(args: argparse.Namespace) -> None:
                 "dataset": str(args.dataset),
                 "dense_model": settings.embedding_model,
                 "sparse_model": settings.sparse_embedding_model,
+                "reranker_model": settings.reranker_model,
+                "candidate_k": settings.retrieval_top_k,
                 "reports": reports,
             },
             indent=2,
