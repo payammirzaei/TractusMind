@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from app.api.ops_auth import require_ops_admin
 from app.core.config import get_settings
 from app.ingestion.registry import get_source, load_source_registry
+from app.observability.metrics import QUEUE_ENQUEUED
 from app.state.store import IngestionRunRecord, SourceStateStore
 from app.workers.tasks import sync_source_task
 
@@ -133,6 +134,7 @@ async def _source_responses(request: Request) -> list[SourceOpsStatus]:
 
 def _enqueue(source_id: str) -> EnqueueResult:
     message = sync_source_task.send(source_id)
+    QUEUE_ENQUEUED.labels(origin="ops_api").inc()
     return EnqueueResult(source_id=source_id, message_id=message.message_id)
 
 
