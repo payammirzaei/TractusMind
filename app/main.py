@@ -12,6 +12,7 @@ from app.api.routes.conversations import router as conversations_router
 from app.api.routes.feedback import router as feedback_router
 from app.api.routes.health import router as health_router
 from app.api.routes.interaction_ops import router as interaction_ops_router
+from app.api.routes.me import router as me_router
 from app.api.routes.metrics import router as metrics_router
 from app.api.routes.ops import router as ops_router
 from app.api.routes.quality_ops import router as quality_ops_router
@@ -49,9 +50,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.qdrant = create_qdrant_client(settings)
     app.state.auth_store = AuthStore(app.state.postgres)
     app.state.oidc_auth = (
-        OIDCAuthenticator(settings, app.state.auth_store)
-        if settings.oidc_enabled
-        else None
+        OIDCAuthenticator(settings, app.state.auth_store) if settings.oidc_enabled else None
     )
     app.state.conversation_store = ConversationStore(app.state.postgres)
     app.state.quality_store = QualityStore(app.state.postgres)
@@ -91,6 +90,7 @@ app.include_router(health_router)
 app.include_router(ask_router)
 app.include_router(conversations_router)
 app.include_router(feedback_router)
+app.include_router(me_router)
 app.include_router(ops_router)
 app.include_router(interaction_ops_router)
 app.include_router(quality_ops_router)
