@@ -20,6 +20,16 @@ def fail(message: str) -> None:
     raise RuntimeError(message)
 
 
+def assert_dependency_health(body: object) -> None:
+    if not isinstance(body, dict) or body.get("status") != "ok":
+        fail(f"Production backend readiness is not ok: {body}")
+    checks = body.get("checks")
+    if not isinstance(checks, dict) or not all(
+        checks.get(name) == "ok" for name in ("postgres", "redis", "qdrant")
+    ):
+        fail(f"Production dependency health is not green: {checks}")
+
+
 def main() -> int:
     if not BASE_URL:
         fail("TRACTUSMIND_PRODUCTION_URL is required")
@@ -86,15 +96,12 @@ def main() -> int:
     if "server" in headers or "x-powered-by" in headers:
         fail("Production response exposes a server technology header")
 
-    print("[prod-smoke] requiring green backend readiness through BFF")
-    _, health, _ = call("/api/health")
-    if not isinstance(health, dict) or health.get("status") != "ok":
-        fail(f"Production health is not ok: {health}")
-    checks = health.get("checks")
-    if not isinstance(checks, dict) or not all(
-        checks.get(name) == "ok" for name in ("postgres", "redis", "qdrant")
-    ):
-        fail(f"Production dependency health is not green: {checks}")
+    print("[prod-smoke] checking Mission Control runtime and real backend readiness")
+    _, ui_health, _ = call("/api/health")
+    if not isinstance(ui_health, dict) or ui_health.get("status") != "ok":
+        fail(f"Mission Control runtime health is not ok: {ui_health}")
+    _, backend_health, _ = call("/api/backend/health/ready")
+    assert_dependency_health(backend_health)
 
     print("[prod-smoke] authenticating through the real Mission Control session boundary")
     _, identity, _ = call("/api/session", method="POST", payload={"token": API_KEY})
