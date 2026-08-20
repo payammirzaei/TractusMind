@@ -6,6 +6,8 @@ class RetrievalHit(BaseModel):
     score: float
     retrieval_score: float | None = None
     rerank_score: float | None = None
+    debug_score: float | None = None
+    retrieval_methods: list[str] = Field(default_factory=list)
     text: str
     source_id: str
     repository: str
