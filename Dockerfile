@@ -1,4 +1,4 @@
-FROM python:3.12-slim AS runtime
+FROM python:3.12-slim-bookworm AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -6,7 +6,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN groupadd --system app && useradd --system --gid app --create-home app
+RUN groupadd --system app && \
+    useradd --system --gid app --create-home app && \
+    mkdir -p /home/app/.cache && \
+    chown -R app:app /home/app/.cache
 
 COPY pyproject.toml README.md alembic.ini ./
 COPY app ./app
