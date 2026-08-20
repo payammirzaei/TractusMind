@@ -37,6 +37,21 @@ FEEDBACK = Counter(
     "User feedback submitted for persisted answers.",
     ("rating",),
 )
+QUALITY_REVIEW_SIGNALS = Counter(
+    "tractusmind_quality_review_signals_total",
+    "Production signals successfully routed into the quality-review workflow.",
+    ("trigger",),
+)
+QUALITY_REVIEW_DECISIONS = Counter(
+    "tractusmind_quality_review_decisions_total",
+    "Human quality-review decisions.",
+    ("action", "root_cause"),
+)
+QUALITY_REGRESSION_PROMOTIONS = Counter(
+    "tractusmind_quality_regression_promotions_total",
+    "Human-reviewed production interactions promoted to regression cases.",
+    ("benchmark_kind",),
+)
 RETRIEVAL_RESULTS = Histogram(
     "tractusmind_retrieval_results",
     "Number of retrieval results returned before generation.",
