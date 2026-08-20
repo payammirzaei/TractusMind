@@ -26,17 +26,25 @@ class Settings(BaseSettings):
     qdrant_collection: str = "tractusmind_knowledge"
 
     github_token: str | None = None
+    github_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
+    github_max_attempts: int = Field(default=4, ge=1, le=10)
 
     llm_base_url: str | None = None
     llm_api_key: str | None = None
     llm_model: str | None = None
     llm_timeout_seconds: float = Field(default=60.0, gt=0.0, le=300.0)
+    llm_max_attempts: int = Field(default=3, ge=1, le=6)
     llm_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     llm_max_tokens: int = Field(default=1_500, ge=128, le=16_384)
     generation_context_max_chars: int = Field(default=24_000, ge=1_000, le=200_000)
     verification_max_claims: int = Field(default=12, ge=1, le=50)
     history_max_turns: int = Field(default=6, ge=1, le=20)
     history_max_chars: int = Field(default=6_000, ge=500, le=30_000)
+
+    provider_retry_base_seconds: float = Field(default=0.5, ge=0.0, le=30.0)
+    provider_retry_max_seconds: float = Field(default=8.0, ge=0.1, le=120.0)
+    provider_circuit_failure_threshold: int = Field(default=3, ge=1, le=20)
+    provider_circuit_cooldown_seconds: float = Field(default=30.0, gt=0.0, le=600.0)
 
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     embedding_batch_size: int = Field(default=32, ge=1, le=256)
