@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
 from app.api.ops_auth import require_ops_admin
@@ -58,7 +58,13 @@ async def create_user(
     payload: CreateUserRequest,
     request: Request,
 ) -> UserCredentialResponse:
-    credential = await request.app.state.auth_store.create_user(payload.display_name)
+    display_name = payload.display_name.strip()
+    if not display_name:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="display_name must not be blank",
+        )
+    credential = await request.app.state.auth_store.create_user(display_name)
     return _credential(credential)
 
 
