@@ -96,7 +96,9 @@ class GitHubApiClient:
             except httpx.TransportError as exc:
                 transient_error = exc
                 transient_reason = (
-                    "timeout" if isinstance(exc, httpx.TimeoutException) else "transport"
+                    "timeout"
+                    if isinstance(exc, httpx.TimeoutException)
+                    else "transport"
                 )
                 if attempt < self.max_attempts:
                     await self._retry(
@@ -215,7 +217,9 @@ class GitHubApiClient:
             payload = response.json()
         except ValueError:
             return False
-        message = str(payload.get("message", "")).casefold() if isinstance(payload, dict) else ""
+        message = ""
+        if isinstance(payload, dict):
+            message = str(payload.get("message", "")).casefold()
         return "rate limit" in message
 
     @staticmethod
