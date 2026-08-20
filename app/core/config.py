@@ -68,6 +68,17 @@ class Settings(BaseSettings):
     history_max_turns: int = Field(default=6, ge=1, le=20)
     history_max_chars: int = Field(default=6_000, ge=500, le=30_000)
 
+    oidc_enabled: bool = False
+    oidc_issuer_url: str | None = None
+    oidc_audience: str | None = None
+    oidc_allowed_algorithms: str = "RS256"
+    oidc_role_claims: str = "roles,realm_access.roles,groups"
+    oidc_admin_roles: str = ""
+    oidc_operator_roles: str = ""
+    oidc_display_name_claims: str = "name,preferred_username,email"
+    oidc_http_timeout_seconds: float = Field(default=10.0, gt=0.0, le=60.0)
+    oidc_cache_ttl_seconds: int = Field(default=3_600, ge=30, le=86_400)
+
     provider_retry_base_seconds: float = Field(default=0.5, ge=0.0, le=30.0)
     provider_retry_max_seconds: float = Field(default=8.0, ge=0.1, le=120.0)
     provider_circuit_failure_threshold: int = Field(default=3, ge=1, le=20)
@@ -121,6 +132,8 @@ class Settings(BaseSettings):
             except OSError as exc:
                 raise ValueError(f"Unable to read secret file for {target}: {path}") from exc
             object.__setattr__(self, target, value)
+        if self.oidc_enabled and not self.oidc_issuer_url:
+            raise ValueError("OIDC_ISSUER_URL is required when OIDC_ENABLED=true")
         return self
 
     @property
@@ -136,6 +149,26 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return self._csv(self.cors_origins)
+
+    @property
+    def oidc_algorithm_list(self) -> list[str]:
+        return self._csv(self.oidc_allowed_algorithms)
+
+    @property
+    def oidc_role_claim_list(self) -> list[str]:
+        return self._csv(self.oidc_role_claims)
+
+    @property
+    def oidc_admin_role_list(self) -> list[str]:
+        return self._csv(self.oidc_admin_roles)
+
+    @property
+    def oidc_operator_role_list(self) -> list[str]:
+        return self._csv(self.oidc_operator_roles)
+
+    @property
+    def oidc_display_name_claim_list(self) -> list[str]:
+        return self._csv(self.oidc_display_name_claims)
 
     @staticmethod
     def _csv(value: str) -> list[str]:
