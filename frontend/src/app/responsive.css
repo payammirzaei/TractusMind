@@ -1,0 +1,5 @@
+.tm-mobile-only { display: none; }
+
+@media (max-width: 900px) {
+  .tm-mobile-only { display: block !important; }
+}
