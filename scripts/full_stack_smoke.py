@@ -108,7 +108,8 @@ def main() -> int:
         headers={"Origin": UI_URL, "Sec-Fetch-Site": "same-origin"},
     )
     set_cookie = login_headers.get("set-cookie", "")
-    if "__Host-tm_session=" not in set_cookie or "HttpOnly" not in set_cookie or "Secure" not in set_cookie:
+    required_cookie_flags = ("__Host-tm_session=", "HttpOnly", "Secure")
+    if not all(flag in set_cookie for flag in required_cookie_flags):
         raise RuntimeError(f"Production session cookie policy missing: {set_cookie}")
     if not isinstance(identity, dict) or identity.get("role") != "admin":
         raise RuntimeError(f"Unexpected authenticated identity: {identity}")
@@ -158,4 +159,4 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except Exception as exc:  # noqa: BLE001 - CLI boundary
         print(f"[integration] FAIL: {exc}", file=sys.stderr)
-        raise SystemExit(1)
+        raise SystemExit(1) from None
