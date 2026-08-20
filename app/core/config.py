@@ -32,9 +32,7 @@ class Settings(BaseSettings):
     llm_model: str | None = None
 
     embedding_model: str = "BAAI/bge-small-en-v1.5"
-    embedding_query_prefix: str = "Represent this sentence for searching relevant passages: "
     embedding_batch_size: int = Field(default=32, ge=1, le=256)
-    embedding_device: str | None = None
     reranker_model: str = "BAAI/bge-reranker-base"
 
     s3_endpoint_url: str | None = None
