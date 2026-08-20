@@ -58,7 +58,13 @@ async def run_source_sync(
         state = SourceStateStore(engine)
         retrieval = create_hybrid_retrieval_service(resolved_settings, qdrant)
         async with SourceIngestionPipeline(
-            token=resolved_settings.github_token
+            token=resolved_settings.github_token,
+            timeout=resolved_settings.github_timeout_seconds,
+            max_attempts=resolved_settings.github_max_attempts,
+            retry_base_seconds=resolved_settings.provider_retry_base_seconds,
+            retry_max_seconds=resolved_settings.provider_retry_max_seconds,
+            circuit_failure_threshold=resolved_settings.provider_circuit_failure_threshold,
+            circuit_cooldown_seconds=resolved_settings.provider_circuit_cooldown_seconds,
         ) as pipeline:
             sync = IncrementalSourceSync(
                 pipeline=pipeline,
