@@ -18,6 +18,7 @@ router = APIRouter(
 class InteractionOpsStatus(BaseModel):
     interaction_id: str
     conversation_id: str
+    request_id: str | None
     question: str
     answer: str | None
     status: str
@@ -47,6 +48,7 @@ def _response(record: InteractionRecord) -> InteractionOpsStatus:
     return InteractionOpsStatus(
         interaction_id=record.interaction_id,
         conversation_id=record.conversation_id,
+        request_id=record.request_id,
         question=record.question,
         answer=record.answer,
         status=record.status,
