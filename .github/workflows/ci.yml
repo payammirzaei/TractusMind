@@ -41,6 +41,8 @@ jobs:
         run: tractusmind-db bootstrap
       - name: Check database revision
         run: tractusmind-db check
+      - name: Check ORM migration drift
+        run: tractusmind-db drift
       - name: Test
         run: pytest -q
       - name: Legacy adoption smoke test
@@ -70,3 +72,4 @@ jobs:
           tractusmind-db downgrade 0001_core_schema
           tractusmind-db upgrade head
           tractusmind-db check
+          tractusmind-db drift
