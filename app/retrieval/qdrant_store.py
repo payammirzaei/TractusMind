@@ -52,6 +52,7 @@ class QdrantKnowledgeStore:
             "source_id",
             "repository",
             "component",
+            "version_ref",
             "commit_sha",
             "content_type",
             "language",
@@ -167,11 +168,13 @@ class QdrantKnowledgeStore:
                 models.Prefetch(
                     query=list(dense_vector),
                     using=DENSE_VECTOR_NAME,
+                    filter=query_filter,
                     limit=prefetch_limit,
                 ),
                 models.Prefetch(
                     query=sparse_vector,
                     using=SPARSE_VECTOR_NAME,
+                    filter=query_filter,
                     limit=prefetch_limit,
                 ),
             ],
@@ -194,6 +197,9 @@ class QdrantKnowledgeStore:
                     source_id=str(payload["source_id"]),
                     repository=str(payload["repository"]),
                     component=str(payload["component"]),
+                    version_ref=(
+                        str(payload["version_ref"]) if payload.get("version_ref") else None
+                    ),
                     commit_sha=str(payload["commit_sha"]),
                     path=str(payload["path"]),
                     content_type=str(payload["content_type"]),
@@ -223,6 +229,7 @@ class QdrantKnowledgeStore:
             "source_id": chunk.source_id,
             "repository": chunk.repository,
             "component": chunk.component,
+            "version_ref": chunk.version_ref,
             "commit_sha": chunk.commit_sha,
             "path": chunk.path,
             "blob_sha": chunk.blob_sha,
