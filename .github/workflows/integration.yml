@@ -27,6 +27,7 @@ permissions:
 
 jobs:
   full-stack:
+    # Release-candidate integration contract for the real local service topology.
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
