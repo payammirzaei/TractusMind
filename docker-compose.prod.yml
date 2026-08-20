@@ -1,0 +1,319 @@
+services:
+  migrate:
+    image: ${TRACTUSMIND_IMAGE:-tractusmind:local}
+    build: .
+    command: tractusmind-db bootstrap
+    env_file: .env.production
+    environment:
+      APP_ENV: production
+      DATABASE_URL_FILE: /run/secrets/database_url
+    secrets:
+      - database_url
+    networks: [backend]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    image: ${TRACTUSMIND_IMAGE:-tractusmind:local}
+    build: .
+    command: >-
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port 8000
+      --proxy-headers
+      --forwarded-allow-ips=*
+      --timeout-graceful-shutdown 30
+    env_file: .env.production
+    environment:
+      APP_ENV: production
+      DOCS_ENABLED: "false"
+      TRUST_FORWARDED_FOR: "true"
+      DATABASE_URL_FILE: /run/secrets/database_url
+      REDIS_URL_FILE: /run/secrets/redis_url
+      LLM_API_KEY_FILE: /run/secrets/llm_api_key
+      OPS_ADMIN_KEY_FILE: /run/secrets/ops_admin_key
+      METRICS_ADMIN_KEY_FILE: /run/secrets/metrics_admin_key
+    secrets:
+      - database_url
+      - redis_url
+      - llm_api_key
+      - ops_admin_key
+      - metrics_admin_key
+    networks: [edge, backend]
+    expose: ["8000"]
+    volumes:
+      - model_cache:/home/app/.cache
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${API_MEMORY_LIMIT:-4g}
+    cpus: ${API_CPU_LIMIT:-2.0}
+    stop_grace_period: 45s
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=3).read()"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    restart: unless-stopped
+
+  worker:
+    image: ${TRACTUSMIND_IMAGE:-tractusmind:local}
+    build: .
+    command: >-
+      sh -c 'mkdir -p /tmp/dramatiq-prometheus &&
+      rm -f /tmp/dramatiq-prometheus/* &&
+      exec dramatiq app.workers.tasks --processes 1 --threads 1'
+    env_file: .env.production
+    environment:
+      APP_ENV: production
+      DATABASE_URL_FILE: /run/secrets/database_url
+      REDIS_URL_FILE: /run/secrets/redis_url
+      GITHUB_TOKEN_FILE: /run/secrets/github_token
+      PROMETHEUS_MULTIPROC_DIR: /tmp/dramatiq-prometheus
+      prometheus_multiproc_dir: /tmp/dramatiq-prometheus
+      dramatiq_prom_db: /tmp/dramatiq-prometheus
+    secrets:
+      - database_url
+      - redis_url
+      - github_token
+    networks: [backend]
+    expose: ["9101", "9191"]
+    volumes:
+      - model_cache:/home/app/.cache
+      - ./config:/app/config:ro
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${WORKER_MEMORY_LIMIT:-6g}
+    cpus: ${WORKER_CPU_LIMIT:-3.0}
+    stop_grace_period: 60s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    restart: unless-stopped
+
+  scheduler:
+    image: ${TRACTUSMIND_IMAGE:-tractusmind:local}
+    build: .
+    command: tractusmind-scheduler
+    env_file: .env.production
+    environment:
+      APP_ENV: production
+      REDIS_URL_FILE: /run/secrets/redis_url
+    secrets:
+      - redis_url
+    networks: [backend]
+    expose: ["9102"]
+    volumes:
+      - ./config:/app/config:ro
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${SCHEDULER_MEMORY_LIMIT:-512m}
+    cpus: ${SCHEDULER_CPU_LIMIT:-0.5}
+    stop_grace_period: 30s
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.10.0-alpine
+    environment:
+      TRACTUSMIND_DOMAIN: ${TRACTUSMIND_DOMAIN:?Set TRACTUSMIND_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL}
+    networks: [edge]
+    ports:
+      - "443:443/tcp"
+      - "443:443/udp"
+    volumes:
+      - ./config/Caddyfile.prod:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${CADDY_MEMORY_LIMIT:-512m}
+    cpus: ${CADDY_CPU_LIMIT:-1.0}
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.13.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+    secrets:
+      - metrics_admin_key
+    networks: [backend]
+    volumes:
+      - ./config/prometheus.prod.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/alerts:/etc/prometheus/alerts:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    mem_limit: ${PROMETHEUS_MEMORY_LIMIT:-2g}
+    cpus: ${PROMETHEUS_CPU_LIMIT:-1.5}
+    depends_on:
+      api:
+        condition: service_healthy
+      alertmanager:
+        condition: service_started
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.33.1
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    networks: [backend]
+    volumes:
+      - ./config/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    mem_limit: ${ALERTMANAGER_MEMORY_LIMIT:-512m}
+    cpus: ${ALERTMANAGER_CPU_LIMIT:-0.5}
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:13.1.0
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SECURITY_COOKIE_SECURE: "true"
+      GF_SECURITY_COOKIE_SAMESITE: strict
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+    secrets:
+      - grafana_admin_password
+    networks: [backend]
+    volumes:
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    mem_limit: ${GRAFANA_MEMORY_LIMIT:-1g}
+    cpus: ${GRAFANA_CPU_LIMIT:-1.0}
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17.10-alpine
+    environment:
+      POSTGRES_DB: tractusmind
+      POSTGRES_USER: tractusmind
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    networks: [backend]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    mem_limit: ${POSTGRES_MEMORY_LIMIT:-2g}
+    cpus: ${POSTGRES_CPU_LIMIT:-2.0}
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tractusmind -d tractusmind"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4.9-alpine
+    command: >-
+      sh -c 'exec redis-server --appendonly yes
+      --requirepass "$$(cat /run/secrets/redis_password)"'
+    secrets:
+      - redis_password
+    networks: [backend]
+    volumes:
+      - redis_data:/data
+    mem_limit: ${REDIS_MEMORY_LIMIT:-1g}
+    cpus: ${REDIS_CPU_LIMIT:-1.0}
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'redis-cli -a "$$(cat /run/secrets/redis_password)" ping | grep PONG'
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.19.0
+    networks: [backend]
+    volumes:
+      - qdrant_data:/qdrant/storage
+    mem_limit: ${QDRANT_MEMORY_LIMIT:-4g}
+    cpus: ${QDRANT_CPU_LIMIT:-2.0}
+    stop_grace_period: 60s
+    restart: unless-stopped
+
+networks:
+  edge:
+  backend:
+    internal: true
+
+secrets:
+  database_url:
+    file: ./secrets/database_url
+  postgres_password:
+    file: ./secrets/postgres_password
+  redis_url:
+    file: ./secrets/redis_url
+  redis_password:
+    file: ./secrets/redis_password
+  llm_api_key:
+    file: ./secrets/llm_api_key
+  github_token:
+    file: ./secrets/github_token
+  ops_admin_key:
+    file: ./secrets/ops_admin_key
+  metrics_admin_key:
+    file: ./secrets/metrics_admin_key
+  grafana_admin_password:
+    file: ./secrets/grafana_admin_password
+
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:
+  prometheus_data:
+  alertmanager_data:
+  grafana_data:
+  model_cache:
+  caddy_data:
+  caddy_config:
