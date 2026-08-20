@@ -43,19 +43,24 @@ async def ask(payload: AskRequest, request: Request) -> GroundedAnswer:
     try:
         answer = await service.answer(payload.question)
     except LLMGenerationError as exc:
-        trace = finish_answer_trace(token)
-        await _persist_failure(
+        await _finish_and_persist_failure(
             request,
+            token=token,
             question=payload.question,
             conversation_id=conversation_id,
-            error_type=type(exc).__name__,
-            stage_durations=trace.stage_durations,
-            total_duration_seconds=perf_counter() - started,
-            trace_id=current_trace_id(),
+            error=exc,
+            started=started,
         )
         raise HTTPException(status_code=502, detail="Grounded answer generation failed") from exc
-    except Exception:
-        finish_answer_trace(token)
+    except Exception as exc:
+        await _finish_and_persist_failure(
+            request,
+            token=token,
+            question=payload.question,
+            conversation_id=conversation_id,
+            error=exc,
+            started=started,
+        )
         raise
 
     trace = finish_answer_trace(token)
@@ -80,24 +85,24 @@ async def ask(payload: AskRequest, request: Request) -> GroundedAnswer:
     return answer
 
 
-async def _persist_failure(
+async def _finish_and_persist_failure(
     request: Request,
     *,
+    token,
     question: str,
     conversation_id: str | None,
-    error_type: str,
-    stage_durations: dict[str, float],
-    total_duration_seconds: float,
-    trace_id: str | None,
+    error: Exception,
+    started: float,
 ) -> None:
+    trace = finish_answer_trace(token)
     try:
         await request.app.state.conversation_store.record_failure(
             question=question,
             conversation_id=conversation_id,
-            error_type=error_type,
-            stage_durations=stage_durations,
-            total_duration_seconds=total_duration_seconds,
-            trace_id=trace_id,
+            error_type=type(error).__name__,
+            stage_durations=trace.stage_durations,
+            total_duration_seconds=perf_counter() - started,
+            trace_id=current_trace_id(),
         )
     except Exception as exc:
         logger.exception(
