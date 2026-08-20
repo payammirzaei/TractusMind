@@ -22,6 +22,7 @@ class GroundedContext:
             block.citation_id: AnswerCitation(
                 citation_id=block.citation_id,
                 chunk_id=block.hit.chunk_id,
+                source_id=block.hit.source_id,
                 repository=block.hit.repository,
                 component=block.hit.component,
                 commit_sha=block.hit.commit_sha,
@@ -39,6 +40,7 @@ class GroundedContext:
 def _render_block(citation_id: str, hit: RetrievalHit) -> str:
     metadata = [
         f"[{citation_id}]",
+        f"source_id: {hit.source_id}",
         f"repository: {hit.repository}",
         f"component: {hit.component}",
         f"commit: {hit.commit_sha}",
