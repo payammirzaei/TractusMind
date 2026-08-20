@@ -8,6 +8,7 @@ from qdrant_client import AsyncQdrantClient, models
 from app.core.config import Settings
 from app.infra.postgres import create_postgres_engine
 from app.infra.qdrant import create_qdrant_client
+from app.ingestion.github_client import GitHubApiClient, GitHubSourceError
 from app.ingestion.models import SourceDefinition
 from app.ingestion.registry import DEFAULT_REGISTRY_PATH, get_enabled_sources
 from app.retrieval.qdrant_store import model_scoped_collection_name
@@ -39,6 +40,7 @@ class CorpusSourceReport:
     component: str
     version_ref: str
     snapshot_commit_sha: str | None
+    upstream_commit_sha: str | None
     last_successful_run_id: str | None
     file_count: int
     current_snapshot_chunks: int
@@ -57,6 +59,7 @@ class CorpusValidationReport:
     sparse_model: str
     reranker_model: str
     enabled_source_count: int
+    upstream_verified: bool
     passed: bool
     sources: tuple[CorpusSourceReport, ...]
     violations: tuple[CorpusViolation, ...]
@@ -78,6 +81,7 @@ def evaluate_corpus_contract(
     collection_exists: bool,
     settings: Settings,
     registry_path: Path = DEFAULT_REGISTRY_PATH,
+    upstream_commits: dict[str, str | None] | None = None,
 ) -> CorpusValidationReport:
     violations: list[CorpusViolation] = []
     reports: list[CorpusSourceReport] = []
@@ -96,6 +100,18 @@ def evaluate_corpus_contract(
         source_violations_before = len(violations)
         status = statuses_by_id.get(source.id)
         source_counts = counts.get(source.id, IndexedSourceCounts(0, 0))
+        upstream_commit = (
+            upstream_commits.get(source.id) if upstream_commits is not None else None
+        )
+
+        if upstream_commits is not None and not upstream_commit:
+            violations.append(
+                CorpusViolation(
+                    check="upstream-ref",
+                    source_id=source.id,
+                    detail=f"could not resolve current upstream ref {source.ref}",
+                )
+            )
 
         if status is None:
             violations.append(
@@ -112,6 +128,7 @@ def evaluate_corpus_contract(
                     component=source.component,
                     version_ref=source.ref,
                     snapshot_commit_sha=None,
+                    upstream_commit_sha=upstream_commit,
                     last_successful_run_id=None,
                     file_count=0,
                     current_snapshot_chunks=source_counts.current_snapshot_chunks,
@@ -144,6 +161,17 @@ def evaluate_corpus_contract(
                     check="ref-match",
                     source_id=source.id,
                     detail=f"state has {status.version_ref}, registry expects {source.ref}",
+                )
+            )
+        if upstream_commit and status.snapshot_commit_sha != upstream_commit:
+            violations.append(
+                CorpusViolation(
+                    check="upstream-snapshot-match",
+                    source_id=source.id,
+                    detail=(
+                        f"indexed snapshot {status.snapshot_commit_sha} is behind upstream "
+                        f"{upstream_commit} for ref {source.ref}"
+                    ),
                 )
             )
         if status.file_count <= 0:
@@ -217,6 +245,7 @@ def evaluate_corpus_contract(
                 component=source.component,
                 version_ref=source.ref,
                 snapshot_commit_sha=status.snapshot_commit_sha,
+                upstream_commit_sha=upstream_commit,
                 last_successful_run_id=status.last_successful_run_id,
                 file_count=status.file_count,
                 current_snapshot_chunks=source_counts.current_snapshot_chunks,
@@ -241,6 +270,7 @@ def evaluate_corpus_contract(
         sparse_model=settings.sparse_embedding_model,
         reranker_model=settings.reranker_model,
         enabled_source_count=len(sources),
+        upstream_verified=upstream_commits is not None,
         passed=not violations,
         sources=tuple(reports),
         violations=tuple(violations),
@@ -251,11 +281,13 @@ async def inspect_full_corpus(
     settings: Settings,
     *,
     registry_path: Path = DEFAULT_REGISTRY_PATH,
+    verify_upstream: bool = False,
 ) -> CorpusValidationReport:
     sources = get_enabled_sources(registry_path)
     engine = create_postgres_engine(settings)
     qdrant: AsyncQdrantClient = create_qdrant_client(settings)
     state = SourceStateStore(engine)
+    github: GitHubApiClient | None = None
     try:
         await state.ensure_schema()
         statuses = await state.list_source_statuses()
@@ -291,6 +323,27 @@ async def inspect_full_corpus(
                     total_source_chunks=total,
                 )
 
+        upstream_commits: dict[str, str | None] | None = None
+        if verify_upstream:
+            upstream_commits = {}
+            github = GitHubApiClient(
+                token=settings.github_token,
+                timeout=settings.github_timeout_seconds,
+                max_attempts=settings.github_max_attempts,
+                retry_base_seconds=settings.provider_retry_base_seconds,
+                retry_max_seconds=settings.provider_retry_max_seconds,
+                circuit_failure_threshold=settings.provider_circuit_failure_threshold,
+                circuit_cooldown_seconds=settings.provider_circuit_cooldown_seconds,
+            )
+            for source in sources:
+                try:
+                    payload = await github.get_json(
+                        f"/repos/{source.full_name}/commits/{source.ref}"
+                    )
+                    upstream_commits[source.id] = str(payload["sha"])
+                except (GitHubSourceError, KeyError, TypeError):
+                    upstream_commits[source.id] = None
+
         return evaluate_corpus_contract(
             sources=sources,
             statuses=statuses,
@@ -299,8 +352,11 @@ async def inspect_full_corpus(
             collection_exists=collection_exists,
             settings=settings,
             registry_path=registry_path,
+            upstream_commits=upstream_commits,
         )
     finally:
+        if github is not None:
+            await github.close()
         await qdrant.close()
         await engine.dispose()
 
