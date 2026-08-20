@@ -35,5 +35,6 @@ def configure_tracing(app: FastAPI, settings: Settings) -> TracerProvider | None
         app,
         tracer_provider=provider,
         excluded_urls="/health/live,/metrics",
+        exclude_spans=["send", "receive"],
     )
     return provider
