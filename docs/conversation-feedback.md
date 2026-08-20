@@ -5,11 +5,13 @@ can be evaluated from real usage instead of only offline benchmark seeds.
 
 ## Data model
 
-Three tables are used:
+Three conversation/feedback tables are used:
 
-- `conversation`: groups related requests by an opaque UUID.
+- `conversation`: groups related requests by an opaque UUID and may carry `owner_user_id`.
 - `answer_interaction`: immutable request/answer and execution-trace record.
 - `answer_feedback`: one mutable feedback record per completed interaction.
+
+Authenticated user identity is stored separately in `app_user`; plaintext API keys are never stored.
 
 A completed interaction stores:
 
@@ -63,18 +65,27 @@ A successful persisted response includes both identifiers:
 }
 ```
 
-A later request can continue the same grouping:
+An authenticated user can continue their owned conversation:
 
-```json
+```http
+Authorization: Bearer tm_...
+Content-Type: application/json
+
 {
   "question": "What about contract negotiation?",
   "conversation_id": "..."
 }
 ```
 
-Conversation grouping does not yet inject previous conversation turns into the generation prompt.
-That will only be added with an explicit history-selection and token-budget policy; persistence and
-LLM context are intentionally separate concerns.
+Authenticated owned conversations may contribute bounded completed history to generation.
+Anonymous requests remain supported, but anonymous history is never injected into the prompt.
+
+History is limited by `HISTORY_MAX_TURNS` and `HISTORY_MAX_CHARS`. It is explicitly marked as
+conversation context, not source evidence, and must never be cited. Claim verification continues to
+use the current question and current retrieved source evidence.
+
+See [`authenticated-conversations.md`](authenticated-conversations.md) for ownership, credential,
+and follow-up retrieval rules.
 
 ## Request-scoped timing trace
 
@@ -120,11 +131,20 @@ Content-Type: application/json
 interaction updates the existing feedback instead of creating contradictory duplicate votes.
 Feedback for unknown or failed interactions is rejected.
 
-## Admin inspection
+If the interaction belongs to an authenticated conversation, feedback is accepted only from that
+conversation owner. Cross-user and unknown interaction cases intentionally share the same `404`
+shape.
 
-Conversation history is not exposed through a public read endpoint because TractusMind does not
-yet have user authentication or ownership checks. Administrators can inspect production records
-through the existing protected operations API:
+## User-owned reads and admin inspection
+
+Authenticated users can read only their own conversation history:
+
+```text
+GET /v1/conversations
+GET /v1/conversations/{conversation_id}
+```
+
+Administrators retain protected cross-user production inspection through:
 
 ```text
 GET /v1/ops/interactions
@@ -134,9 +154,9 @@ GET /v1/ops/interactions?conversation_id=<uuid>
 GET /v1/ops/feedback/summary
 ```
 
-These endpoints use the same `X-TractusMind-Admin-Key` protection as the ingestion operations API.
-The interaction response includes both `request_id` and `trace_id`, enabling direct correlation
-from structured logs or an OpenTelemetry backend.
+Admin endpoints use `X-TractusMind-Admin-Key`. User history endpoints use the opaque bearer user
+credential. The interaction response includes both `request_id` and `trace_id`, enabling direct
+correlation from structured logs or an OpenTelemetry backend.
 
 ## Failure policy
 
@@ -148,16 +168,15 @@ logged.
 Generation/runtime failures are also persisted on a best-effort basis before the normal HTTP error
 is returned.
 
-## Next use of this data
+## Quality use of persisted interactions
 
-The persisted interaction corpus is intended to feed:
+The persisted interaction corpus feeds:
 
 - feedback-segmented quality reports,
-- regression-case promotion from real failed/down-voted questions,
+- human-reviewed regression-case promotion from failed/down-voted questions,
 - route and citation error analysis,
 - latency/bottleneck analysis,
-- later conversation history selection,
+- authenticated bounded conversation context,
 - benchmark expansion from reviewed production examples.
 
-Raw production feedback should never be promoted automatically into a gold benchmark without
-review.
+Raw production feedback is never promoted automatically into a gold benchmark without review.
