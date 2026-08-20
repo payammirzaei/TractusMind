@@ -10,6 +10,7 @@ def _chunk() -> KnowledgeChunk:
         source_id="tractusx-sdk",
         repository="eclipse-tractusx/tractusx-sdk",
         component="sdk",
+        version_ref="v0.9.0",
         commit_sha="a" * 40,
         path="tractusx_sdk/dataspace/services/connector.py",
         blob_sha="b" * 40,
@@ -61,6 +62,7 @@ def test_qdrant_payload_keeps_exact_traceability() -> None:
     payload = store._payload(chunk, "BAAI/bge-small-en-v1.5", "Qdrant/bm25")
 
     assert payload["chunk_id"] == chunk.chunk_id
+    assert payload["version_ref"] == "v0.9.0"
     assert payload["commit_sha"] == "a" * 40
     assert payload["symbol"] == "create_asset"
     assert payload["parent_symbol"] == "BaseConnectorService"
