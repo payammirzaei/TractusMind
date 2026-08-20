@@ -58,6 +58,26 @@ MODEL_OPERATION_DURATION = Histogram(
     "Local model operation latency.",
     ("role", "operation"),
 )
+PROVIDER_REQUESTS = Counter(
+    "tractusmind_provider_requests_total",
+    "External provider logical request outcomes.",
+    ("provider", "operation", "outcome"),
+)
+PROVIDER_RETRIES = Counter(
+    "tractusmind_provider_retries_total",
+    "External provider retries by reason.",
+    ("provider", "operation", "reason"),
+)
+PROVIDER_RETRY_DELAY = Histogram(
+    "tractusmind_provider_retry_delay_seconds",
+    "Delay applied before external provider retries.",
+    ("provider", "operation"),
+)
+PROVIDER_CIRCUIT_OPEN = Counter(
+    "tractusmind_provider_circuit_open_total",
+    "External provider calls rejected or circuits opened after transient failures.",
+    ("provider", "event"),
+)
 INGESTION_RUNS = Counter(
     "tractusmind_ingestion_runs_total",
     "Background ingestion run outcomes.",
