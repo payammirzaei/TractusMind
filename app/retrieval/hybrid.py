@@ -8,6 +8,8 @@ from app.embeddings.sparse import SparseEmbeddingService
 from app.embeddings.text import build_embedding_text, build_sparse_text
 from app.retrieval.models import RetrievalHit
 from app.retrieval.qdrant_store import QdrantKnowledgeStore, model_scoped_collection_name
+from app.routing.filters import build_route_filter
+from app.routing.models import QueryRoute
 
 
 class HybridRetrievalService:
@@ -63,9 +65,19 @@ class HybridRetrievalService:
 
         return indexed
 
-    async def search_dense(self, query: str, *, limit: int = 10) -> list[RetrievalHit]:
+    async def search_dense(
+        self,
+        query: str,
+        *,
+        limit: int = 10,
+        route: QueryRoute | None = None,
+    ) -> list[RetrievalHit]:
         dense_vector = await self.dense_embedder.embed_query(query)
-        return await self.store.dense_search(dense_vector, limit=limit)
+        return await self.store.dense_search(
+            dense_vector,
+            limit=limit,
+            query_filter=build_route_filter(route),
+        )
 
     async def search_hybrid(
         self,
@@ -73,6 +85,7 @@ class HybridRetrievalService:
         *,
         limit: int = 10,
         prefetch_limit: int = 40,
+        route: QueryRoute | None = None,
     ) -> list[RetrievalHit]:
         dense_vector = await self.dense_embedder.embed_query(query)
         sparse_vector = await self.sparse_embedder.embed_query(query)
@@ -81,4 +94,5 @@ class HybridRetrievalService:
             sparse_vector,
             limit=limit,
             prefetch_limit=max(prefetch_limit, limit),
+            query_filter=build_route_filter(route),
         )
