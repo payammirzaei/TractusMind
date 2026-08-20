@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     sparse_embedding_batch_size: int = Field(default=32, ge=1, le=256)
     hybrid_prefetch_k: int = Field(default=40, ge=2, le=500)
     reranker_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
+    reranker_batch_size: int = Field(default=32, ge=1, le=128)
 
     s3_endpoint_url: str | None = None
     s3_access_key_id: str | None = None
