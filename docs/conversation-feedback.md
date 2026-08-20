@@ -16,6 +16,7 @@ A completed interaction stores:
 ```text
 interaction_id
 conversation_id
+request_id
 question
 answer
 grounded / abstained
@@ -30,9 +31,15 @@ OpenTelemetry trace_id
 created_at
 ```
 
+`request_id` is the same bounded value returned in `X-Request-ID`, so logs can be correlated with
+the persisted interaction even when OpenTelemetry export is disabled. Client-supplied request IDs
+are accepted only when non-empty and no longer than 64 characters; otherwise TractusMind creates a
+UUID.
+
 Failed answer requests are also persisted with `status=failed`, the captured stage durations,
-total duration, trace ID when tracing is enabled, and a safe `error_type`. Raw provider exception
-messages are not persisted in this table.
+total duration, request/trace correlation, a safe `error_type`, and route/model/evidence metadata
+when the pipeline reached those stages. Raw provider exception messages are not persisted in this
+table.
 
 ## Conversation continuity
 
@@ -128,6 +135,8 @@ GET /v1/ops/feedback/summary
 ```
 
 These endpoints use the same `X-TractusMind-Admin-Key` protection as the ingestion operations API.
+The interaction response includes both `request_id` and `trace_id`, enabling direct correlation
+from structured logs or an OpenTelemetry backend.
 
 ## Failure policy
 
