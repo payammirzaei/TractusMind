@@ -9,6 +9,7 @@ from app.embeddings.sparse import SparseEmbeddingService
 from app.infra.qdrant import create_qdrant_client
 from app.ingestion.pipeline import SourceIngestionPipeline
 from app.ingestion.registry import get_source
+from app.reranking.service import CrossEncoderReranker
 from app.retrieval.hybrid import HybridRetrievalService
 
 
@@ -39,7 +40,7 @@ def _parser() -> argparse.ArgumentParser:
     search = subparsers.add_parser("search", help="Run retrieval against Qdrant")
     search.add_argument("query")
     search.add_argument("--limit", type=int, default=5)
-    search.add_argument("--mode", choices=("dense", "hybrid"), default="hybrid")
+    search.add_argument("--mode", choices=("dense", "hybrid", "rerank"), default="rerank")
 
     return parser
 
@@ -66,11 +67,23 @@ async def _run_search(args: argparse.Namespace, settings: Settings) -> None:
     try:
         if args.mode == "dense":
             hits = await retrieval.search_dense(args.query, limit=args.limit)
-        else:
+        elif args.mode == "hybrid":
             hits = await retrieval.search_hybrid(
                 args.query,
                 limit=args.limit,
                 prefetch_limit=settings.hybrid_prefetch_k,
+            )
+        else:
+            candidate_k = max(settings.retrieval_top_k, args.limit)
+            candidates = await retrieval.search_hybrid(
+                args.query,
+                limit=candidate_k,
+                prefetch_limit=max(settings.hybrid_prefetch_k, candidate_k),
+            )
+            hits = await CrossEncoderReranker(settings.reranker_model).rerank(
+                args.query,
+                candidates,
+                limit=args.limit,
             )
     finally:
         await qdrant.close()
@@ -85,6 +98,14 @@ async def _run_search(args: argparse.Namespace, settings: Settings) -> None:
                     {
                         "rank": rank,
                         "score": round(hit.score, 6),
+                        "retrieval_score": (
+                            round(hit.retrieval_score, 6)
+                            if hit.retrieval_score is not None
+                            else None
+                        ),
+                        "rerank_score": (
+                            round(hit.rerank_score, 6) if hit.rerank_score is not None else None
+                        ),
                         "source_id": hit.source_id,
                         "repository": hit.repository,
                         "component": hit.component,
