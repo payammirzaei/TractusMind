@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from pathlib import Path
 
 from app.core.config import Settings
 from app.evaluation.answers import load_answer_benchmark
@@ -43,17 +44,25 @@ def _run(status: SourceStatusRecord) -> IngestionRunRecord:
     )
 
 
-def test_full_corpus_contract_passes_for_current_snapshots() -> None:
+def _healthy_contract_inputs():
     sources = get_enabled_sources()
     statuses = [
         _status(source.id, source.full_name, source.component, source.ref)
         for source in sources
     ]
-    runs = {status.last_successful_run_id: _run(status) for status in statuses}
+    runs = {
+        status.last_successful_run_id or "missing": _run(status)
+        for status in statuses
+    }
     counts = {
         source.id: IndexedSourceCounts(current_snapshot_chunks=8, total_source_chunks=8)
         for source in sources
     }
+    return sources, statuses, runs, counts
+
+
+def test_full_corpus_contract_passes_for_current_snapshots() -> None:
+    sources, statuses, runs, counts = _healthy_contract_inputs()
 
     report = evaluate_corpus_contract(
         sources=sources,
@@ -66,6 +75,7 @@ def test_full_corpus_contract_passes_for_current_snapshots() -> None:
 
     assert report.passed is True
     assert report.enabled_source_count == len(sources)
+    assert report.upstream_verified is False
     assert not report.violations
     assert all(source.passed for source in report.sources)
 
@@ -78,7 +88,7 @@ def test_full_corpus_contract_rejects_stale_or_missing_index_state() -> None:
     report = evaluate_corpus_contract(
         sources=sources,
         statuses=[status],
-        runs={status.last_successful_run_id: _run(status)},
+        runs={status.last_successful_run_id or "missing": _run(status)},
         counts={
             first.id: IndexedSourceCounts(
                 current_snapshot_chunks=5,
@@ -96,17 +106,41 @@ def test_full_corpus_contract_rejects_stale_or_missing_index_state() -> None:
         assert ("source-state", source.id) in checks
 
 
+def test_full_corpus_contract_rejects_snapshot_behind_upstream() -> None:
+    sources, statuses, runs, counts = _healthy_contract_inputs()
+    upstream = {status.source_id: status.snapshot_commit_sha for status in statuses}
+    upstream[sources[0].id] = "new-upstream-snapshot"
+
+    report = evaluate_corpus_contract(
+        sources=sources,
+        statuses=statuses,
+        runs=runs,
+        counts=counts,
+        collection_exists=True,
+        settings=Settings(),
+        upstream_commits=upstream,
+    )
+
+    assert report.passed is False
+    assert report.upstream_verified is True
+    assert any(
+        violation.check == "upstream-snapshot-match"
+        and violation.source_id == sources[0].id
+        for violation in report.violations
+    )
+
+
 def test_v1_benchmarks_cover_every_enabled_source() -> None:
     enabled = {source.id for source in get_enabled_sources()}
 
-    retrieval_cases = load_benchmark("benchmarks/full_corpus_v1.jsonl")
+    retrieval_cases = load_benchmark(Path("benchmarks/full_corpus_v1.jsonl"))
     retrieval_sources = {
         source_id
         for case in retrieval_cases
         for source_id in case.expected_sources
     }
 
-    answer_cases = load_answer_benchmark("benchmarks/answer_v1.jsonl")
+    answer_cases = load_answer_benchmark(Path("benchmarks/answer_v1.jsonl"))
     answer_sources = {
         source_id
         for case in answer_cases
