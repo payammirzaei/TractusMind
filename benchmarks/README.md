@@ -12,6 +12,19 @@ tractusmind-benchmark --mode all --k 5
 
 The retrieval runner compares Dense, Hybrid, and Hybrid + Reranker with Recall@K, MRR, NDCG@K, first relevant rank, and top source IDs.
 
+## Debug retrieval benchmark
+
+`debug_v0.jsonl` contains validated code/config identifiers from current Tractus-X sources. It exercises the debug-specific path: exact phrase/symbol/path lookup + hybrid retrieval + weighted RRF + cross-encoder reranking.
+
+```bash
+tractusmind-benchmark \
+  --dataset benchmarks/debug_v0.jsonl \
+  --mode rerank \
+  --k 5
+```
+
+The first seed covers real identifiers including `BaseConnectorService`, `edc.api.auth.key`, `DspTransferProcessTransformV08Extension`, `ShellMapper`, and `AssetAdministrationShellApiDelegate`.
+
 ## Answer benchmark
 
 `answer_v0.jsonl` contains both answerable and deliberately unanswerable questions. The negative cases are required for meaningful abstention calibration.
