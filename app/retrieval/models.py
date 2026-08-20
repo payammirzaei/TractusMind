@@ -4,6 +4,8 @@ from pydantic import BaseModel, Field
 class RetrievalHit(BaseModel):
     chunk_id: str
     score: float
+    retrieval_score: float | None = None
+    rerank_score: float | None = None
     text: str
     source_id: str
     repository: str
