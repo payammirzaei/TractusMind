@@ -78,6 +78,28 @@ class QdrantKnowledgeStore:
 
         return indexed
 
+    async def remove_stale_source_versions(self, source_id: str, current_commit_sha: str) -> None:
+        await self.client.delete(
+            collection_name=self.collection_name,
+            points_selector=models.FilterSelector(
+                filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="source_id",
+                            match=models.MatchValue(value=source_id),
+                        )
+                    ],
+                    must_not=[
+                        models.FieldCondition(
+                            key="commit_sha",
+                            match=models.MatchValue(value=current_commit_sha),
+                        )
+                    ],
+                )
+            ),
+            wait=True,
+        )
+
     async def search(
         self,
         query_vector: Sequence[float],
