@@ -18,7 +18,7 @@ async def verify_database_revision(engine: AsyncEngine) -> str:
             revisions = [str(value) for value in rows.scalars().all()]
     except SQLAlchemyError as exc:
         raise DatabaseSchemaError(
-            "Database migration state is unavailable. Run `tractusmind-db upgrade`."
+            "Database migration state is unavailable. Run `tractusmind-db bootstrap`."
         ) from exc
 
     if revisions != [CURRENT_DATABASE_REVISION]:
@@ -26,6 +26,6 @@ async def verify_database_revision(engine: AsyncEngine) -> str:
         raise DatabaseSchemaError(
             "Database schema is not current: "
             f"expected {CURRENT_DATABASE_REVISION}, found {current}. "
-            "Run `tractusmind-db upgrade`."
+            "Run `tractusmind-db bootstrap`."
         )
     return CURRENT_DATABASE_REVISION
