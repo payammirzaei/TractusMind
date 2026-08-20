@@ -5,7 +5,7 @@ from qdrant_client import AsyncQdrantClient
 from app.chunking.models import KnowledgeChunk
 from app.embeddings.service import DenseEmbeddingService
 from app.embeddings.sparse import SparseEmbeddingService
-from app.embeddings.text import build_embedding_text
+from app.embeddings.text import build_embedding_text, build_sparse_text
 from app.retrieval.models import RetrievalHit
 from app.retrieval.qdrant_store import QdrantKnowledgeStore, model_scoped_collection_name
 
@@ -43,9 +43,10 @@ class HybridRetrievalService:
             raise ValueError("Stale-version cleanup requires chunks from one source and one commit")
 
         await self.store.ensure_collection(self.dense_embedder.dimension, hybrid=True)
-        embedding_texts = [build_embedding_text(chunk) for chunk in chunks]
-        dense_vectors = await self.dense_embedder.embed_documents(embedding_texts)
-        sparse_vectors = await self.sparse_embedder.embed_documents(embedding_texts)
+        dense_texts = [build_embedding_text(chunk) for chunk in chunks]
+        sparse_texts = [build_sparse_text(chunk) for chunk in chunks]
+        dense_vectors = await self.dense_embedder.embed_documents(dense_texts)
+        sparse_vectors = await self.sparse_embedder.embed_documents(sparse_texts)
         indexed = await self.store.upsert_chunks(
             chunks,
             dense_vectors,
