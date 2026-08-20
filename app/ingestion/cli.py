@@ -4,14 +4,17 @@ import json
 
 from app.chunking import SmartChunker
 from app.core.config import Settings, get_settings
+from app.infra.postgres import create_postgres_engine
 from app.infra.qdrant import create_qdrant_client
 from app.ingestion.pipeline import SourceIngestionPipeline
 from app.ingestion.registry import get_source
+from app.ingestion.sync import IncrementalSourceSync
 from app.retrieval.factory import (
     create_hybrid_retrieval_service,
     create_reranked_retrieval_service,
 )
 from app.routing.service import QueryRouter
+from app.state import SourceStateStore
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -37,6 +40,12 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional smoke-test file limit. Full indexing cleans stale source versions.",
     )
+
+    sync = subparsers.add_parser(
+        "sync",
+        help="Incrementally synchronize one source using PostgreSQL file state",
+    )
+    sync.add_argument("source_id")
 
     search = subparsers.add_parser("search", help="Run routed retrieval against Qdrant")
     search.add_argument("query")
@@ -110,13 +119,14 @@ async def _run_search(args: argparse.Namespace, settings: Settings) -> None:
                         "repository": hit.repository,
                         "component": hit.component,
                         "version_ref": hit.version_ref,
+                        "snapshot_commit_sha": hit.snapshot_commit_sha,
+                        "content_commit_sha": hit.commit_sha,
                         "path": hit.path,
                         "kind": hit.kind,
                         "language": hit.language,
                         "symbol": hit.symbol,
                         "parent_symbol": hit.parent_symbol,
                         "section_path": hit.section_path,
-                        "commit_sha": hit.commit_sha,
                         "start_line": hit.start_line,
                         "end_line": hit.end_line,
                         "source_url": hit.source_url,
@@ -130,11 +140,35 @@ async def _run_search(args: argparse.Namespace, settings: Settings) -> None:
     )
 
 
+async def _run_sync(args: argparse.Namespace, settings: Settings) -> None:
+    source = get_source(args.source_id)
+    engine = create_postgres_engine(settings)
+    qdrant = create_qdrant_client(settings)
+    retrieval = create_hybrid_retrieval_service(settings, qdrant)
+    state = SourceStateStore(engine)
+
+    try:
+        async with SourceIngestionPipeline(token=settings.github_token) as pipeline:
+            result = await IncrementalSourceSync(
+                pipeline=pipeline,
+                retrieval=retrieval,
+                state=state,
+            ).sync(source)
+    finally:
+        await qdrant.close()
+        await engine.dispose()
+
+    print(json.dumps(result.__dict__, indent=2))
+
+
 async def _run(args: argparse.Namespace) -> None:
     settings = get_settings()
 
     if args.command == "search":
         await _run_search(args, settings)
+        return
+    if args.command == "sync":
+        await _run_sync(args, settings)
         return
 
     source = get_source(args.source_id)
@@ -183,7 +217,7 @@ async def _run(args: argparse.Namespace) -> None:
                             "document_count": len(documents),
                             "chunk_count": len(chunks),
                             "indexed_count": indexed,
-                            "collection": settings.qdrant_collection,
+                            "collection": retrieval.store.collection_name,
                             "dense_model": settings.embedding_model,
                             "sparse_model": settings.sparse_embedding_model,
                             "full_source_index": args.limit is None,
