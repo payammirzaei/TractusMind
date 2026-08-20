@@ -1,0 +1,138 @@
+name: Production Quality Gate
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  quality-gate:
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.QUALITY_GATE_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      QDRANT_URL: ${{ secrets.QUALITY_QDRANT_URL }}
+      QDRANT_API_KEY: ${{ secrets.QUALITY_QDRANT_API_KEY }}
+      LLM_BASE_URL: ${{ secrets.QUALITY_LLM_BASE_URL }}
+      LLM_API_KEY: ${{ secrets.QUALITY_LLM_API_KEY }}
+      LLM_MODEL: ${{ vars.QUALITY_LLM_MODEL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Validate live evaluation configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$QDRANT_URL" || { echo "QUALITY_QDRANT_URL is required"; exit 2; }
+          test -n "$LLM_BASE_URL" || { echo "QUALITY_LLM_BASE_URL is required"; exit 2; }
+          test -n "$LLM_API_KEY" || { echo "QUALITY_LLM_API_KEY is required"; exit 2; }
+          test -n "$LLM_MODEL" || { echo "QUALITY_LLM_MODEL variable is required"; exit 2; }
+
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+
+      - name: Prepare reports
+        run: mkdir -p artifacts/quality
+
+      - name: Run retrieval seed report
+        run: |
+          tractusmind-benchmark \
+            --dataset benchmarks/dense_v0.jsonl \
+            --mode rerank \
+            --k 5 > artifacts/quality/retrieval-seed.json
+
+      - name: Run debug seed report
+        run: |
+          tractusmind-benchmark \
+            --dataset benchmarks/debug_v0.jsonl \
+            --mode rerank \
+            --k 5 > artifacts/quality/debug-seed.json
+
+      - name: Calibrate evidence threshold
+        run: |
+          tractusmind-answer-eval calibrate \
+            --dataset benchmarks/answer_v0.jsonl \
+            --max-unsafe-rate 0 \
+            > artifacts/quality/calibration.json
+
+      - name: Load pinned production threshold
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
+
+          config = tomllib.loads(Path("config/quality_gate.toml").read_text())
+          threshold = config.get("calibration", {}).get("minimum_relevance_score")
+          if threshold is not None:
+              with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
+                  handle.write(f"MINIMUM_RELEVANCE_SCORE={float(threshold)}\n")
+          PY
+
+      - name: Run grounded answer safety report
+        run: |
+          tractusmind-answer-eval evaluate \
+            --dataset benchmarks/answer_v0.jsonl \
+            > artifacts/quality/answer-seed.json
+
+      - name: Run reviewed regression datasets
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -s benchmarks/regressions/retrieval.jsonl ]; then
+            tractusmind-benchmark \
+              --dataset benchmarks/regressions/retrieval.jsonl \
+              --mode rerank --k 5 \
+              > artifacts/quality/retrieval-regression.json
+          fi
+          if [ -s benchmarks/regressions/debug.jsonl ]; then
+            tractusmind-benchmark \
+              --dataset benchmarks/regressions/debug.jsonl \
+              --mode rerank --k 5 \
+              > artifacts/quality/debug-regression.json
+          fi
+          if [ -s benchmarks/regressions/answer.jsonl ]; then
+            tractusmind-answer-eval evaluate \
+              --dataset benchmarks/regressions/answer.jsonl \
+              > artifacts/quality/answer-regression.json
+          fi
+
+      - name: Enforce production quality contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(
+            --config config/quality_gate.toml
+            --calibration artifacts/quality/calibration.json
+            --answer artifacts/quality/answer-seed.json
+            --require-pinned-threshold
+          )
+          if [ -f artifacts/quality/retrieval-regression.json ]; then
+            args+=(--retrieval-regression artifacts/quality/retrieval-regression.json)
+          fi
+          if [ -f artifacts/quality/debug-regression.json ]; then
+            args+=(--debug-regression artifacts/quality/debug-regression.json)
+          fi
+          if [ -f artifacts/quality/answer-regression.json ]; then
+            args+=(--answer-regression artifacts/quality/answer-regression.json)
+          fi
+          tractusmind-quality-gate "${args[@]}" | tee artifacts/quality/gate.json
+
+      - name: Upload quality reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tractusmind-quality-${{ github.sha }}
+          path: artifacts/quality
+          if-no-files-found: warn
+          retention-days: 30
