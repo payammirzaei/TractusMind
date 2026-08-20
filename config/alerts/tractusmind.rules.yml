@@ -119,6 +119,36 @@ groups:
           summary: "Generation p95 latency is high"
           description: "Grounded generation p95 latency has exceeded 15 seconds for 15 minutes."
 
+  - name: tractusmind.quality
+    interval: 1m
+    rules:
+      - alert: TractusMindHighNegativeFeedbackRatio
+        expr: |
+          (
+            sum(increase(tractusmind_answer_feedback_total{rating="down"}[30m]))
+            /
+            clamp_min(sum(increase(tractusmind_answer_feedback_total[30m])), 1)
+          ) > 0.25
+          and
+          sum(increase(tractusmind_answer_feedback_total[30m])) >= 8
+        for: 15m
+        labels:
+          severity: warning
+          service: quality
+        annotations:
+          summary: "Negative feedback ratio is high"
+          description: "More than 25% of at least 8 feedback submissions in 30 minutes are negative."
+
+      - alert: TractusMindFailureReviewSpike
+        expr: increase(tractusmind_quality_review_signals_total{trigger="failure"}[15m]) > 5
+        for: 10m
+        labels:
+          severity: warning
+          service: quality
+        annotations:
+          summary: "Failed-answer quality review signals spiked"
+          description: "More than 5 failed-answer review signals were captured within 15 minutes."
+
   - name: tractusmind.ingestion
     interval: 1m
     rules:
