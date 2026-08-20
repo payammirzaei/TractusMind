@@ -5,10 +5,11 @@ import json
 from app.chunking import SmartChunker
 from app.core.config import Settings, get_settings
 from app.embeddings.service import DenseEmbeddingService
+from app.embeddings.sparse import SparseEmbeddingService
 from app.infra.qdrant import create_qdrant_client
 from app.ingestion.pipeline import SourceIngestionPipeline
 from app.ingestion.registry import get_source
-from app.retrieval.dense import DenseRetrievalService
+from app.retrieval.hybrid import HybridRetrievalService
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -26,7 +27,7 @@ def _parser() -> argparse.ArgumentParser:
     chunk.add_argument("source_id")
     chunk.add_argument("--limit", type=int, default=3)
 
-    index = subparsers.add_parser("index", help="Fetch, chunk, embed, and index one source")
+    index = subparsers.add_parser("index", help="Fetch, chunk, embed, and hybrid-index one source")
     index.add_argument("source_id")
     index.add_argument(
         "--limit",
@@ -35,35 +36,42 @@ def _parser() -> argparse.ArgumentParser:
         help="Optional smoke-test file limit. Full indexing cleans stale source versions.",
     )
 
-    search = subparsers.add_parser("search", help="Run dense retrieval against Qdrant")
+    search = subparsers.add_parser("search", help="Run retrieval against Qdrant")
     search.add_argument("query")
     search.add_argument("--limit", type=int, default=5)
+    search.add_argument("--mode", choices=("dense", "hybrid"), default="hybrid")
 
     return parser
 
 
-def _dense_service(settings: Settings):
+def _retrieval_service(settings: Settings):
     qdrant = create_qdrant_client(settings)
-    embedder = DenseEmbeddingService(
-        settings.embedding_model,
-        batch_size=settings.embedding_batch_size,
-    )
-    retrieval = DenseRetrievalService(
+    retrieval = HybridRetrievalService(
         qdrant=qdrant,
         collection_name=settings.qdrant_collection,
-        embedder=embedder,
+        dense_embedder=DenseEmbeddingService(
+            settings.embedding_model,
+            batch_size=settings.embedding_batch_size,
+        ),
+        sparse_embedder=SparseEmbeddingService(
+            settings.sparse_embedding_model,
+            batch_size=settings.sparse_embedding_batch_size,
+        ),
     )
     return qdrant, retrieval
 
 
 async def _run_search(args: argparse.Namespace, settings: Settings) -> None:
-    qdrant, retrieval = _dense_service(settings)
+    qdrant, retrieval = _retrieval_service(settings)
     try:
-        hits = await retrieval.search(
-            args.query,
-            limit=args.limit,
-            score_threshold=settings.minimum_relevance_score,
-        )
+        if args.mode == "dense":
+            hits = await retrieval.search_dense(args.query, limit=args.limit)
+        else:
+            hits = await retrieval.search_hybrid(
+                args.query,
+                limit=args.limit,
+                prefetch_limit=settings.hybrid_prefetch_k,
+            )
     finally:
         await qdrant.close()
 
@@ -71,6 +79,7 @@ async def _run_search(args: argparse.Namespace, settings: Settings) -> None:
         json.dumps(
             {
                 "query": args.query,
+                "mode": args.mode,
                 "result_count": len(hits),
                 "results": [
                     {
@@ -133,7 +142,7 @@ async def _run(args: argparse.Namespace) -> None:
             chunks = SmartChunker().chunk_many(documents)
 
             if args.command == "index":
-                qdrant, retrieval = _dense_service(settings)
+                qdrant, retrieval = _retrieval_service(settings)
                 try:
                     indexed = await retrieval.index(
                         chunks,
@@ -152,7 +161,8 @@ async def _run(args: argparse.Namespace) -> None:
                             "chunk_count": len(chunks),
                             "indexed_count": indexed,
                             "collection": settings.qdrant_collection,
-                            "embedding_model": settings.embedding_model,
+                            "dense_model": settings.embedding_model,
+                            "sparse_model": settings.sparse_embedding_model,
                             "full_source_index": args.limit is None,
                         },
                         indent=2,
