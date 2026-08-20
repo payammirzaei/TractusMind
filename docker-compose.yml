@@ -66,7 +66,7 @@ services:
         condition: service_healthy
 
   prometheus:
-    image: prom/prometheus:v3.13.2
+    image: prom/prometheus:v3.13.1
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
@@ -94,7 +94,7 @@ services:
       - "9093:9093"
 
   grafana:
-    image: grafana/grafana:13.1
+    image: grafana/grafana:13.1.0
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-this-before-production}
@@ -111,7 +111,7 @@ services:
       - alertmanager
 
   postgres:
-    image: postgres:17-alpine
+    image: postgres:17.10-alpine
     environment:
       POSTGRES_DB: tractusmind
       POSTGRES_USER: tractusmind
@@ -125,7 +125,7 @@ services:
       retries: 10
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4.9-alpine
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
@@ -136,7 +136,7 @@ services:
       retries: 10
 
   qdrant:
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:v1.19.0
     volumes:
       - qdrant_data:/qdrant/storage
     ports:
