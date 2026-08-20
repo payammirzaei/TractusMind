@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     qdrant_api_key: str | None = None
     qdrant_collection: str = "tractusmind_knowledge"
 
+    github_token: str | None = None
+
     llm_base_url: str | None = None
     llm_api_key: str | None = None
     llm_model: str | None = None
