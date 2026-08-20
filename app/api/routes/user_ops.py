@@ -5,7 +5,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
 from app.api.ops_auth import require_ops_admin
-from app.auth.store import UserCredential, UserIdentity, UserRole
+from app.auth.store import (
+    ExternalRoleManagedError,
+    UserCredential,
+    UserIdentity,
+    UserRole,
+)
 
 router = APIRouter(
     prefix="/v1/ops/users",
@@ -97,11 +102,14 @@ async def update_user_state(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="At least one of enabled or role is required",
         )
-    identity = await request.app.state.auth_store.update_user(
-        str(user_id),
-        enabled=payload.enabled,
-        role=payload.role,
-    )
+    try:
+        identity = await request.app.state.auth_store.update_user(
+            str(user_id),
+            enabled=payload.enabled,
+            role=payload.role,
+        )
+    except ExternalRoleManagedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if identity is None:
         raise HTTPException(status_code=404, detail="Unknown user")
     return _user(identity)
