@@ -8,11 +8,20 @@ from opentelemetry import trace
 from app.observability.metrics import HTTP_REQUEST_DURATION, HTTP_REQUESTS
 
 
+def _request_id(request: Request) -> str:
+    supplied = request.headers.get("X-Request-ID")
+    if supplied is not None:
+        normalized = supplied.strip()
+        if 1 <= len(normalized) <= 64:
+            return normalized
+    return str(uuid4())
+
+
 async def observe_http_request(request: Request, call_next) -> Response:
     if request.url.path == "/metrics":
         return await call_next(request)
 
-    request_id = request.headers.get("X-Request-ID") or str(uuid4())
+    request_id = _request_id(request)
     request.state.request_id = request_id
     log_context = {"request_id": request_id}
     span_context = trace.get_current_span().get_span_context()
