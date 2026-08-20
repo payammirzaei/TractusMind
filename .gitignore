@@ -3,6 +3,7 @@ __pycache__/
 *.so
 .Python
 .env
+.env.production
 .venv/
 venv/
 .pytest_cache/
@@ -15,3 +16,5 @@ build/
 .idea/
 .vscode/
 .DS_Store
+secrets/
+backups/
