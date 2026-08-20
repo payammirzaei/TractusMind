@@ -17,6 +17,7 @@ from app.api.routes.ops import router as ops_router
 from app.api.routes.quality_ops import router as quality_ops_router
 from app.api.routes.user_ops import router as user_ops_router
 from app.auth import AuthStore
+from app.auth.oidc import OIDCAuthenticator
 from app.conversations import ConversationStore
 from app.core.config import get_settings
 from app.core.logging import configure_logging
@@ -47,6 +48,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.redis = create_redis_client(settings)
     app.state.qdrant = create_qdrant_client(settings)
     app.state.auth_store = AuthStore(app.state.postgres)
+    app.state.oidc_auth = (
+        OIDCAuthenticator(settings, app.state.auth_store)
+        if settings.oidc_enabled
+        else None
+    )
     app.state.conversation_store = ConversationStore(app.state.postgres)
     app.state.quality_store = QualityStore(app.state.postgres)
     app.state.answer_service = None
@@ -54,6 +60,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         "application_started",
         environment=settings.app_env,
         database_revision=database_revision,
+        oidc_enabled=settings.oidc_enabled,
     )
 
     try:
@@ -61,6 +68,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         if app.state.answer_service is not None:
             await app.state.answer_service.close()
+        if app.state.oidc_auth is not None:
+            await app.state.oidc_auth.close()
         await app.state.postgres.dispose()
         await app.state.redis.aclose()
         await app.state.qdrant.close()
