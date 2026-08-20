@@ -60,7 +60,7 @@ class DenseRetrievalService:
         score_threshold: float | None = None,
     ) -> list[RetrievalHit]:
         vector = await self.embedder.embed_query(query)
-        return await self.store.search(
+        return await self.store.dense_search(
             vector,
             limit=limit,
             score_threshold=score_threshold,
