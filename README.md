@@ -4,46 +4,45 @@
 
 TractusMind answers architecture, documentation, coding, debugging, semantic-model, and
 version-specific questions using traceable Tractus-X sources. Retrieval quality, provenance,
-inspectability, and measurable evaluation come before UI work.
+inspectability, production safety, and measurable evaluation come before UI work.
 
 ## What is implemented
 
-- FastAPI query API
-- Qdrant dense + BM25 sparse retrieval
-- exact debug phrase/symbol/path/config retrieval
-- cross-encoder reranking
-- deterministic source/version/ref/commit routing
+- FastAPI source-grounded query API
+- allowlisted, commit-pinned Tractus-X GitHub ingestion
 - structure-aware Markdown/code/YAML/Turtle chunking
+- Qdrant dense + BM25 sparse hybrid retrieval
+- exact debug phrase/symbol/path/config retrieval lane
+- RRF fusion + cross-encoder reranking
+- deterministic source/version/ref/commit routing
 - OpenAI-compatible grounded generation
 - backend-owned citations + atomic claim verification
-- bounded LLM/GitHub retries + process-shared circuit breakers
-- stable LLM idempotency key across transient retries
-- PostgreSQL incremental-ingestion state
+- bounded provider retries, Retry-After handling, idempotency, and circuit breakers
+- PostgreSQL incremental-ingestion and audit state
 - Redis + Dramatiq background source synchronization
-- Prometheus metrics + optional OpenTelemetry traces
-- Grafana dashboards + Prometheus alert rules + Alertmanager
-- persisted answer traces and feedback
-- human-reviewed production regression loop
-- production quality-gate workflow
-- opaque bearer users + owned conversation history
-- Alembic versioned PostgreSQL migrations
-- Docker / Docker Compose / GitHub Actions
+- persisted conversations, traces, and user feedback
+- opaque bearer users + owned bounded conversation history
+- human-reviewed feedback/failure regression loop
+- production evaluation/quality gate
+- Alembic versioned PostgreSQL migrations + drift checking
+- Prometheus + optional OpenTelemetry
+- provisioned Grafana dashboards + Alertmanager rules
+- hardened production Compose topology + automatic TLS edge
+- Docker secret-file loading, request limits, private networks, and resource guards
+- Trivy security CI + tagged GHCR release images with SBOM/provenance
 
-## Quick start
+## Local development
 
 ```bash
 cp .env.example .env
 docker compose up --build
 ```
 
-Compose runs a one-shot database migration service before API and worker startup.
-
 Local services:
 
 ```text
 API          http://localhost:8000
 OpenAPI      http://localhost:8000/docs
-Metrics      http://localhost:8000/metrics
 Grafana      http://localhost:3000
 Prometheus   http://localhost:9090
 Alertmanager http://localhost:9093
@@ -59,19 +58,65 @@ ruff check .
 pytest -q
 ```
 
+## Production deployment
+
+Production uses a separate topology:
+
+```text
+Internet
+   |
+   | TLS 443
+   v
+ Caddy
+   |
+ FastAPI API ------------------ provider egress / LLM
+   |
+   +------------- internal backend -------------+
+   |          |          |          |            |
+Postgres    Redis      Qdrant   Prometheus    Grafana
+                         ^          |
+                         |      Alertmanager
+                      Worker -------- provider egress / GitHub
+```
+
+Start from:
+
+```bash
+cp .env.production.example .env.production
+mkdir -p secrets
+# populate secrets/* as documented
+
+docker compose --env-file .env.production -f docker-compose.prod.yml build
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d
+```
+
+Only Caddy publishes the application edge. PostgreSQL, Redis, and Qdrant have no host ports.
+Grafana/Prometheus/Alertmanager bind only to loopback for SSH-tunneled operator access.
+
+Production adds:
+
+- automatic TLS + HSTS/security headers
+- TrustedHost + explicit CORS policy
+- request-body, rate, and concurrency guards
+- interactive API docs disabled by default
+- Docker `*_FILE` secrets instead of plaintext application credentials
+- read-only application roots, dropped capabilities, `no-new-privileges`
+- graceful shutdown and configurable CPU/memory limits
+- pinned infrastructure release tags
+- PostgreSQL backup/restore scripts
+- Trivy filesystem/image security gates
+- tagged multi-architecture GHCR images with SBOM/provenance
+
+See [`docs/production-deployment.md`](docs/production-deployment.md).
+
 ## Database migrations
 
-PostgreSQL schema changes are managed only through Alembic. Application requests and workers do
-not call `create_all()` or mutate schema at runtime.
-
-Current chain:
+PostgreSQL schema changes are Alembic-only. Runtime code never silently creates or alters tables.
 
 ```text
 0001_core_schema
   -> 0002_user_auth   (head)
 ```
-
-Useful commands:
 
 ```bash
 tractusmind-db bootstrap
@@ -80,18 +125,14 @@ tractusmind-db check
 tractusmind-db drift
 tractusmind-db current
 tractusmind-db history
-tractusmind-db downgrade 0001_core_schema
 ```
-
-`bootstrap` handles fresh, versioned, or complete pre-Alembic TractusMind databases and fails
-closed on partial legacy schemas. `drift` fails if ORM metadata differs from the migrated schema.
 
 See [`docs/database-migrations.md`](docs/database-migrations.md).
 
-## Source registry and ingestion
+## Source synchronization
 
-Official Tractus-X sources are allowlisted in `config/sources.toml`. Repository refs are resolved
-to immutable Git commit SHAs before content is fetched.
+Official sources are allowlisted in `config/sources.toml`. Repository refs resolve to immutable Git
+commits before content is fetched.
 
 ```bash
 tractusmind-ingest discover tractusx-sdk
@@ -101,285 +142,147 @@ tractusmind-ingest index tractusx-sdk --limit 10
 tractusmind-ingest sync tractusx-sdk
 ```
 
-Incremental sync compares Git blob SHAs and classifies files as `added`, `modified`, `deleted`, or
-`unchanged`. Only changed files are fetched/chunked/embedded; unchanged files receive metadata-only
-snapshot updates.
+Incremental sync classifies files as added/modified/deleted/unchanged and only re-embeds changed
+content. Provenance separates the repository snapshot from the exact content commit used by a
+citation.
 
-Snapshot provenance distinguishes:
+See [`docs/incremental-ingestion.md`](docs/incremental-ingestion.md) and
+[`docs/background-ingestion.md`](docs/background-ingestion.md).
 
-```text
-snapshot_commit_sha = repository snapshot currently queried
-commit_sha          = exact commit containing cited file content
-```
-
-See [`docs/incremental-ingestion.md`](docs/incremental-ingestion.md).
-
-## Background source synchronization
-
-```text
-Scheduler
-   ↓
-Redis / Dramatiq
-   ↓
-Ingestion Worker
-   ↓
-per-source Redis lock
-   ↓
-IncrementalSourceSync
-   ↓
-PostgreSQL + Qdrant
-```
-
-Defaults:
-
-```bash
-SOURCE_SYNC_INTERVAL_SECONDS=21600
-SOURCE_SYNC_LOCK_SECONDS=43200
-```
-
-Manual controls:
-
-```bash
-tractusmind-ingest enqueue tractusx-sdk
-tractusmind-ingest enqueue-all
-tractusmind-scheduler --once
-tractusmind-scheduler
-```
-
-See [`docs/background-ingestion.md`](docs/background-ingestion.md).
-
-## Retrieval pipeline
-
-Normal queries:
+## Retrieval and grounded answers
 
 ```text
 question
+  -> owned bounded history when eligible
   -> deterministic route
-  -> metadata/source/version filter
-  -> dense retrieval
-  -> BM25 sparse retrieval
+  -> source/ref/snapshot filter
+  -> dense + BM25 retrieval
+  -> exact debug lane when applicable
   -> RRF fusion
   -> cross-encoder reranking
-  -> evidence threshold
-  -> final evidence
-```
-
-Debug queries add an exact phrase/symbol/parent/path lane before weighted fusion and reranking.
-Every hit preserves source/version/snapshot/content-commit/path/line provenance plus retrieval and
-rerank diagnostics.
-
-## Grounded answer generation
-
-Configure any OpenAI-compatible chat-completions endpoint:
-
-```bash
-LLM_BASE_URL=https://provider.example/v1
-LLM_API_KEY=...
-LLM_MODEL=...
-```
-
-Production path:
-
-```text
-question
-  -> optional owned bounded conversation context
-  -> routing
-  -> retrieval + reranking
-  -> bounded source evidence
+  -> calibrated evidence threshold
   -> grounded generation
-  -> backend citation validation
+  -> citation validation
   -> atomic claim verification
-  -> grounded answer or abstention
+  -> answer or abstention
 ```
 
-Evidence IDs such as `[S1]` are owned by the backend. Unsupported claims fail closed.
+History is context, not evidence. Previous assistant answers cannot become source citations.
+Explicit `ref:` and `commit:` constraints fail closed when indexed provenance is unavailable.
 
 ## Provider resilience
 
-LLM and GitHub are treated as unreliable external boundaries. Transient failures use bounded
-exponential backoff with jitter; permanent client/auth errors fail immediately.
-
-Defaults:
-
-```bash
-GITHUB_TIMEOUT_SECONDS=30
-GITHUB_MAX_ATTEMPTS=4
-LLM_TIMEOUT_SECONDS=60
-LLM_MAX_ATTEMPTS=3
-PROVIDER_RETRY_BASE_SECONDS=0.5
-PROVIDER_RETRY_MAX_SECONDS=8
-PROVIDER_CIRCUIT_FAILURE_THRESHOLD=3
-PROVIDER_CIRCUIT_COOLDOWN_SECONDS=30
-```
-
-One `Idempotency-Key` is reused across retries of the same logical LLM call. Circuit breakers are
-shared within each process and use a single half-open probe after cooldown.
+LLM and GitHub calls use bounded retries for transient failures, exponential backoff with jitter,
+provider rate-limit delays, and process-shared circuit breakers. One stable `Idempotency-Key` is
+reused for retries of one logical LLM call.
 
 See [`docs/provider-resilience.md`](docs/provider-resilience.md).
 
-## Authenticated user-owned conversations
+## Authenticated conversations and feedback
 
-Anonymous `/v1/ask` remains supported, but anonymous history is never loaded into generation.
-Admins create users under `/v1/ops/users`; plaintext opaque API keys are returned only when created
-or rotated, while PostgreSQL stores only their SHA-256 digest and short prefix.
+Admins create opaque bearer credentials through the protected operations API. PostgreSQL stores
+only token digests/prefixes. Authenticated conversations have an owner and cross-user access returns
+`404` to avoid leaking existence.
 
-```http
-Authorization: Bearer tm_...
+```text
+GET /v1/conversations
+GET /v1/conversations/{conversation_id}
+POST /v1/feedback
 ```
-
-Authenticated conversations have `owner_user_id`. Cross-user access deliberately returns `404`.
-History is bounded by:
-
-```bash
-HISTORY_MAX_TURNS=6
-HISTORY_MAX_CHARS=6000
-```
-
-History is context, **not source evidence**. Previous assistant answers cannot be cited.
 
 See [`docs/authenticated-conversations.md`](docs/authenticated-conversations.md) and
 [`docs/conversation-feedback.md`](docs/conversation-feedback.md).
 
-## Feedback-driven quality loop
+## Human-reviewed quality loop
 
 ```text
-failed answer --------+
-                      +-> pending quality review
-user down-vote -------+          ↓
-                           human root cause
-                         /                \
-                    dismiss             promote
-                                           ↓
-                                  regression case
-                                           ↓
-                                  benchmark NDJSON
-                                           ↓
-                                      CI/eval gate
+failed answer / down-vote
+          |
+          v
+ pending quality review
+          |
+     human root cause
+       /       \
+  dismiss    promote
+                |
+         regression case
+                |
+         benchmark export
+                |
+          evaluation gate
 ```
 
-Raw feedback never becomes a gold benchmark automatically. Reviewed regression files remain
-human-approved artifacts under `benchmarks/regressions/`.
+Raw feedback never becomes gold data automatically.
 
-See [`docs/quality-loop.md`](docs/quality-loop.md).
+See [`docs/quality-loop.md`](docs/quality-loop.md) and
+[`docs/quality-gate.md`](docs/quality-gate.md).
 
-## Evaluation and production quality gate
+## Observability
 
-```bash
-tractusmind-benchmark --mode all --k 5
-tractusmind-answer-eval evaluate
-tractusmind-answer-eval calibrate --max-unsafe-rate 0
-tractusmind-quality-gate \
-  --calibration calibration.json \
-  --answer answer.json \
-  --require-pinned-threshold
-```
-
-Hard invariants require zero unsafe answer/evidence acceptance and 100% pass for reviewed
-retrieval, debug, and answer regressions. Aggregate seed MRR/NDCG/recall remain report-only until a
-measured full-corpus baseline is pinned.
-
-See [`docs/quality-gate.md`](docs/quality-gate.md).
-
-## Operations API
-
-Configure `OPS_ADMIN_KEY` and send it as `X-TractusMind-Admin-Key`.
-Protected operations cover source/run state, interactions, users, quality reviews/regressions, and
-manual source-sync enqueue controls.
-
-See [`docs/operations.md`](docs/operations.md).
-
-## Grafana, Prometheus, and alerting
-
-V18 provisions three Grafana dashboards under the `TractusMind` folder:
+Prometheus captures API/RAG/model/provider/ingestion/worker/quality signals. Grafana ships with
+provisioned API/RAG, provider/ingestion, and quality-loop dashboards. Alert rules cover target
+availability, API errors/latency, provider circuit/retry pressure, pipeline errors, ingestion/worker
+failures, and quality-review spikes.
 
 ```text
-TractusMind — API & RAG Overview
-TractusMind — Providers & Ingestion
-TractusMind — Quality Loop
+API metrics       /metrics
+Grafana           3000
+Prometheus        9090
+Alertmanager      9093
 ```
 
-Prometheus loads repository-owned alert rules for target availability, API 5xx/latency, provider
-retry/circuit pressure, RAG pipeline errors, negative-feedback/failure-review spikes, ingestion
-failures, worker failures, and lock contention.
-
-Alertmanager groups and routes alerts. Its repository default receiver intentionally has no external
-Slack/email/PagerDuty/webhook credentials; deployments add those through their secret-management
-system.
-
-New quality-loop metric families include:
-
-```text
-tractusmind_quality_review_signals_total
-tractusmind_quality_review_decisions_total
-tractusmind_quality_regression_promotions_total
-```
-
-Exact pending-review backlog remains a PostgreSQL/ops-API state, not a fake Prometheus gauge.
-Likewise, `tractusmind_queue_enqueued_total` is an enqueue counter and is not presented as queue
-depth.
-
-CI validates Prometheus config/rules with `promtool`, Alertmanager with `amtool`, all Grafana JSON,
-and the full Compose configuration.
+Production operator ports bind only to `127.0.0.1`. Prometheus authenticates to the API metrics
+endpoint using a Docker-secret Bearer credential.
 
 See [`docs/observability.md`](docs/observability.md) and
 [`docs/grafana-alerting.md`](docs/grafana-alerting.md).
 
-## Inspectability principle
+## Backup
 
-No hidden RAG magic. A production answer remains inspectable as:
-
-```text
-identity / anonymous
-  -> owned history when eligible
-  -> question
-  -> route
-  -> source/ref/snapshot filter
-  -> dense/sparse/exact candidates
-  -> fusion + rerank scores
-  -> evidence threshold
-  -> final source evidence
-  -> bounded provider request/retry path
-  -> answer
-  -> citations
-  -> claim/evidence verdicts
-  -> persisted interaction + timings + trace ID
-  -> optional feedback/review
-  -> reviewed regression gate
+```bash
+sh scripts/backup-postgres.sh
+RESTORE_CONFIRM=YES sh scripts/restore-postgres.sh backups/<dump-file>
 ```
 
-See [`docs/architecture.md`](docs/architecture.md).
+PostgreSQL and Qdrant must be recovered as a consistent set, or the vector corpus must be rebuilt
+from immutable source repositories before answers are served.
 
 ## Current milestone
 
-**V18 — Production Grafana + Alerting**
+**V19 — Production Deployment & Security Hardening**
 
 Completed:
 
 - [x] source-grounded ingestion/retrieval/generation pipeline
-- [x] version-aware routing and exact debug retrieval
-- [x] citation and atomic claim verification
-- [x] incremental PostgreSQL/Qdrant source synchronization
-- [x] background scheduler/worker + distributed locks
-- [x] persisted conversations, feedback, and human-reviewed quality loop
-- [x] production quality-gate CLI/workflow
-- [x] opaque bearer users and owned bounded conversation history
-- [x] Alembic versioned schema + legacy bootstrap + ORM drift gate
-- [x] bounded LLM/GitHub retries, Retry-After handling, and circuit breakers
-- [x] Prometheus + optional OpenTelemetry observability
-- [x] provisioned Grafana API/RAG, provider/ingestion, and quality dashboards
-- [x] Prometheus production-shaped alert rules
-- [x] Alertmanager grouping/routing baseline
-- [x] quality-loop Prometheus event metrics
-- [x] CI validation for Prometheus, Alertmanager, Grafana JSON, and Compose
+- [x] version-aware routing + exact debug retrieval
+- [x] grounded citations + atomic claim verification
+- [x] incremental PostgreSQL/Qdrant synchronization
+- [x] scheduler/worker + Redis distributed source locks
+- [x] conversations, feedback, human quality review, and regression promotion
+- [x] production evaluation gate
+- [x] authenticated user-owned bounded history
+- [x] versioned Alembic schema + legacy bootstrap + ORM drift gate
+- [x] provider retries/idempotency/circuit breakers
+- [x] Prometheus/OpenTelemetry/Grafana/Alertmanager observability
+- [x] production-only Compose topology with private backend network
+- [x] Caddy TLS edge and security headers
+- [x] Docker secret-file application configuration
+- [x] request-size/rate/concurrency/TrustedHost/CORS guards
+- [x] production healthchecks, graceful shutdown, and resource limits
+- [x] pinned infrastructure release tags
+- [x] PostgreSQL backup/guarded restore tooling
+- [x] Trivy filesystem + container image security workflow
+- [x] tagged GHCR release image workflow with SBOM/provenance
 
-Still measured/production-dependent:
+Still measured/environment-dependent:
 
 - [ ] run full-corpus debug benchmark and tune fusion weights
-- [ ] run live full-corpus abstention calibration and pin the measured threshold
+- [ ] run live full-corpus abstention calibration and pin measured threshold
 - [ ] promote reviewed real production cases into committed regression files
-- [ ] connect the deployment's real Alertmanager notification receiver and secrets
-- [ ] tune alert thresholds after measured production traffic exists
-- [ ] add OIDC/JWKS adapter if external enterprise SSO is required
+- [ ] connect real Alertmanager receiver/secrets
+- [ ] tune alerts and resource limits from measured traffic
+- [ ] add distributed rate limiting when deploying multiple API replicas
+- [ ] add OIDC/JWKS adapter if enterprise SSO is required
 
 ## License
 
