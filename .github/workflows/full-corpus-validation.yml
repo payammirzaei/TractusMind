@@ -2,12 +2,6 @@ name: Full Corpus Validation
 
 on:
   workflow_dispatch:
-    inputs:
-      refresh_corpus:
-        description: "Incrementally refresh all enabled sources before evaluation"
-        required: true
-        default: true
-        type: boolean
   schedule:
     - cron: "41 2 1 * *"
 
@@ -106,8 +100,7 @@ jobs:
               print(source.id)
           PY
 
-      - name: Refresh full corpus
-        if: ${{ github.event_name == 'schedule' || inputs.refresh_corpus }}
+      - name: Build fresh six-source corpus
         shell: bash
         run: |
           set -euo pipefail
