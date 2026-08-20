@@ -7,6 +7,17 @@ export interface Identity {
   auth_type: string;
 }
 
+export interface ConversationSummary {
+  conversation_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConversationHistory {
+  conversation_id: string;
+  turns: Array<{ question: string; answer: string }>;
+}
+
 export interface QueryRoute {
   intent: string;
   source_ids: string[];
@@ -124,6 +135,21 @@ export interface QualityReview {
   feedback_comment?: string | null;
   created_at: string;
   reviewed_at?: string | null;
+}
+
+export interface RegressionCase {
+  case_id: string;
+  review_id: string;
+  interaction_id: string;
+  benchmark_kind: "retrieval" | "debug" | "answer";
+  question: string;
+  expected_source_ids: string[];
+  expected_terms: string[];
+  expected_abstain: boolean;
+  route_snapshot?: Record<string, unknown> | null;
+  root_cause: string;
+  reviewer_note?: string | null;
+  created_at: string;
 }
 
 export interface ManagedUser {
