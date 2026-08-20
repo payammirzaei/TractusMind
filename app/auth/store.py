@@ -3,8 +3,10 @@ import hashlib
 import secrets
 from dataclasses import dataclass
 from enum import StrEnum
+from uuid import uuid4
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.auth.models import UserAccount
@@ -117,6 +119,22 @@ class AuthStore:
         """Create/update one trusted external identity without overriding local disable state."""
         await self.ensure_schema()
         async with self.sessions.begin() as session:
+            statement = (
+                insert(UserAccount)
+                .values(
+                    user_id=str(uuid4()),
+                    display_name=display_name[:120],
+                    auth_type="oidc",
+                    role=role.value,
+                    oidc_issuer=issuer,
+                    oidc_subject=subject,
+                    api_key_prefix=None,
+                    api_key_hash=None,
+                    enabled=True,
+                )
+                .on_conflict_do_nothing(index_elements=["oidc_issuer", "oidc_subject"])
+            )
+            await session.execute(statement)
             user = await session.scalar(
                 select(UserAccount).where(
                     UserAccount.auth_type == "oidc",
@@ -125,18 +143,7 @@ class AuthStore:
                 )
             )
             if user is None:
-                user = UserAccount(
-                    display_name=display_name[:120],
-                    auth_type="oidc",
-                    role=role.value,
-                    oidc_issuer=issuer,
-                    oidc_subject=subject,
-                    api_key_prefix=None,
-                    api_key_hash=None,
-                )
-                session.add(user)
-                await session.flush()
-                return self._identity(user)
+                raise RuntimeError("OIDC identity upsert did not resolve a user")
             if not user.enabled:
                 return None
             user.display_name = display_name[:120]
