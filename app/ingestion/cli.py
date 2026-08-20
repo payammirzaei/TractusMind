@@ -4,14 +4,14 @@ import json
 
 from app.chunking import SmartChunker
 from app.core.config import Settings, get_settings
-from app.embeddings.service import DenseEmbeddingService
-from app.embeddings.sparse import SparseEmbeddingService
 from app.infra.qdrant import create_qdrant_client
 from app.ingestion.pipeline import SourceIngestionPipeline
 from app.ingestion.registry import get_source
-from app.reranking.service import CrossEncoderReranker
-from app.retrieval.hybrid import HybridRetrievalService
-from app.retrieval.reranked import RerankedRetrievalService
+from app.retrieval.factory import (
+    create_hybrid_retrieval_service,
+    create_reranked_retrieval_service,
+)
+from app.routing.service import QueryRouter
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -38,7 +38,7 @@ def _parser() -> argparse.ArgumentParser:
         help="Optional smoke-test file limit. Full indexing cleans stale source versions.",
     )
 
-    search = subparsers.add_parser("search", help="Run retrieval against Qdrant")
+    search = subparsers.add_parser("search", help="Run routed retrieval against Qdrant")
     search.add_argument("query")
     search.add_argument("--limit", type=int, default=5)
     search.add_argument("--mode", choices=("dense", "hybrid", "rerank"), default="rerank")
@@ -48,43 +48,34 @@ def _parser() -> argparse.ArgumentParser:
 
 def _retrieval_services(settings: Settings):
     qdrant = create_qdrant_client(settings)
-    retrieval = HybridRetrievalService(
-        qdrant=qdrant,
-        collection_name=settings.qdrant_collection,
-        dense_embedder=DenseEmbeddingService(
-            settings.embedding_model,
-            batch_size=settings.embedding_batch_size,
-        ),
-        sparse_embedder=SparseEmbeddingService(
-            settings.sparse_embedding_model,
-            batch_size=settings.sparse_embedding_batch_size,
-        ),
-    )
-    reranked = RerankedRetrievalService(
-        retrieval=retrieval,
-        reranker=CrossEncoderReranker(
-            settings.reranker_model,
-            batch_size=settings.reranker_batch_size,
-        ),
-        candidate_k=settings.retrieval_top_k,
-        prefetch_k=max(settings.hybrid_prefetch_k, settings.retrieval_top_k),
-    )
+    retrieval = create_hybrid_retrieval_service(settings, qdrant)
+    reranked = create_reranked_retrieval_service(settings, qdrant)
     return qdrant, retrieval, reranked
 
 
 async def _run_search(args: argparse.Namespace, settings: Settings) -> None:
+    route = QueryRouter().route(args.query)
     qdrant, retrieval, reranked = _retrieval_services(settings)
     try:
         if args.mode == "dense":
-            hits = await retrieval.search_dense(args.query, limit=args.limit)
+            hits = await retrieval.search_dense(
+                args.query,
+                limit=args.limit,
+                route=route,
+            )
         elif args.mode == "hybrid":
             hits = await retrieval.search_hybrid(
                 args.query,
                 limit=args.limit,
                 prefetch_limit=settings.hybrid_prefetch_k,
+                route=route,
             )
         else:
-            hits = await reranked.search(args.query, limit=args.limit)
+            hits = await reranked.search(
+                args.query,
+                limit=args.limit,
+                route=route,
+            )
     finally:
         await qdrant.close()
 
@@ -93,6 +84,7 @@ async def _run_search(args: argparse.Namespace, settings: Settings) -> None:
             {
                 "query": args.query,
                 "mode": args.mode,
+                "route": route.model_dump(mode="json"),
                 "result_count": len(hits),
                 "results": [
                     {
@@ -104,11 +96,14 @@ async def _run_search(args: argparse.Namespace, settings: Settings) -> None:
                             else None
                         ),
                         "rerank_score": (
-                            round(hit.rerank_score, 6) if hit.rerank_score is not None else None
+                            round(hit.rerank_score, 6)
+                            if hit.rerank_score is not None
+                            else None
                         ),
                         "source_id": hit.source_id,
                         "repository": hit.repository,
                         "component": hit.component,
+                        "version_ref": hit.version_ref,
                         "path": hit.path,
                         "kind": hit.kind,
                         "language": hit.language,
@@ -177,6 +172,7 @@ async def _run(args: argparse.Namespace) -> None:
                         {
                             "source_id": manifest.source_id,
                             "repository": manifest.repository,
+                            "version_ref": manifest.requested_ref,
                             "commit_sha": manifest.commit_sha,
                             "document_count": len(documents),
                             "chunk_count": len(chunks),
@@ -196,6 +192,7 @@ async def _run(args: argparse.Namespace) -> None:
                     {
                         "source_id": manifest.source_id,
                         "repository": manifest.repository,
+                        "version_ref": manifest.requested_ref,
                         "commit_sha": manifest.commit_sha,
                         "document_count": len(documents),
                         "chunk_count": len(chunks),
@@ -203,6 +200,7 @@ async def _run(args: argparse.Namespace) -> None:
                         "chunks": [
                             {
                                 "chunk_id": chunk.chunk_id,
+                                "version_ref": chunk.version_ref,
                                 "path": chunk.path,
                                 "kind": chunk.kind.value,
                                 "symbol": chunk.symbol,
@@ -226,10 +224,12 @@ async def _run(args: argparse.Namespace) -> None:
                 {
                     "source_id": manifest.source_id,
                     "repository": manifest.repository,
+                    "version_ref": manifest.requested_ref,
                     "commit_sha": manifest.commit_sha,
                     "documents": [
                         {
                             "document_id": document.document_id,
+                            "version_ref": document.version_ref,
                             "path": document.path,
                             "language": document.language,
                             "content_type": document.content_type,
