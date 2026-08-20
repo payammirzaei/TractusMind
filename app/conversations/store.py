@@ -135,6 +135,11 @@ class ConversationStore:
         stage_durations: dict[str, float],
         total_duration_seconds: float,
         trace_id: str | None,
+        model: str | None = None,
+        intent: str | None = None,
+        route_json: dict[str, object] | None = None,
+        citations_json: list[dict[str, object]] | None = None,
+        evidence_count: int = 0,
     ) -> InteractionIdentity:
         await self.ensure_schema()
         resolved_conversation_id = conversation_id or str(uuid4())
@@ -156,7 +161,11 @@ class ConversationStore:
                     status="failed",
                     grounded=False,
                     abstained=False,
-                    evidence_count=0,
+                    evidence_count=evidence_count,
+                    model=model,
+                    intent=intent,
+                    route_json=route_json,
+                    citations_json=citations_json,
                     stage_durations_json=stage_durations,
                     total_duration_seconds=total_duration_seconds,
                     trace_id=trace_id,
