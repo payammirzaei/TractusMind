@@ -1,0 +1,153 @@
+groups:
+  - name: tractusmind.availability
+    interval: 30s
+    rules:
+      - alert: TractusMindTargetDown
+        expr: up{job=~"tractusmind-.*"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: tractusmind
+        annotations:
+          summary: "TractusMind metrics target is down"
+          description: "Prometheus has been unable to scrape {{ $labels.job }} for 5 minutes."
+
+      - alert: TractusMindHighApi5xxRate
+        expr: |
+          (
+            sum(rate(tractusmind_http_requests_total{status=~"5.."}[5m]))
+            /
+            clamp_min(sum(rate(tractusmind_http_requests_total[5m])), 0.001)
+          ) > 0.05
+          and
+          sum(rate(tractusmind_http_requests_total[5m])) > 0.05
+        for: 10m
+        labels:
+          severity: critical
+          service: api
+        annotations:
+          summary: "TractusMind API 5xx rate is high"
+          description: "More than 5% of API requests are 5xx for 10 minutes with non-trivial traffic."
+
+      - alert: TractusMindHighApiP95Latency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(tractusmind_http_request_duration_seconds_bucket[10m]))
+          ) > 2
+          and
+          sum(rate(tractusmind_http_requests_total[10m])) > 0.05
+        for: 15m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: "TractusMind API p95 latency is high"
+          description: "API p95 latency has exceeded 2 seconds for 15 minutes."
+
+  - name: tractusmind.providers
+    interval: 30s
+    rules:
+      - alert: TractusMindProviderCircuitOpened
+        expr: increase(tractusmind_provider_circuit_open_total{event="opened"}[10m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          service: provider
+        annotations:
+          summary: "External provider circuit opened"
+          description: "The {{ $labels.provider }} circuit opened after repeated transient failures."
+
+      - alert: TractusMindProviderTransientFailureRate
+        expr: |
+          (
+            sum by (provider) (
+              rate(tractusmind_provider_requests_total{outcome="transient_failure"}[10m])
+            )
+            /
+            clamp_min(
+              sum by (provider) (rate(tractusmind_provider_requests_total[10m])),
+              0.001
+            )
+          ) > 0.10
+          and
+          sum by (provider) (rate(tractusmind_provider_requests_total[10m])) > 0.01
+        for: 10m
+        labels:
+          severity: warning
+          service: provider
+        annotations:
+          summary: "External provider transient failure rate is high"
+          description: "{{ $labels.provider }} transient failures exceed 10% for 10 minutes."
+
+      - alert: TractusMindProviderRetryPressure
+        expr: sum by (provider) (rate(tractusmind_provider_retries_total[10m])) > 0.05
+        for: 15m
+        labels:
+          severity: warning
+          service: provider
+        annotations:
+          summary: "External provider retries are sustained"
+          description: "{{ $labels.provider }} is requiring sustained retries."
+
+  - name: tractusmind.pipeline
+    interval: 30s
+    rules:
+      - alert: TractusMindPipelineErrors
+        expr: sum by (stage) (increase(tractusmind_pipeline_stage_errors_total[15m])) > 3
+        for: 5m
+        labels:
+          severity: warning
+          service: rag
+        annotations:
+          summary: "TractusMind pipeline errors increased"
+          description: "Pipeline stage {{ $labels.stage }} produced more than 3 errors in 15 minutes."
+
+      - alert: TractusMindGenerationP95Latency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (
+              rate(tractusmind_pipeline_stage_duration_seconds_bucket{stage="generation"}[10m])
+            )
+          ) > 15
+        for: 15m
+        labels:
+          severity: warning
+          service: rag
+        annotations:
+          summary: "Generation p95 latency is high"
+          description: "Grounded generation p95 latency has exceeded 15 seconds for 15 minutes."
+
+  - name: tractusmind.ingestion
+    interval: 1m
+    rules:
+      - alert: TractusMindIngestionFailures
+        expr: sum by (source_id) (increase(tractusmind_ingestion_runs_total{status="failed"}[30m])) > 0
+        for: 1m
+        labels:
+          severity: warning
+          service: ingestion
+        annotations:
+          summary: "Source ingestion failed"
+          description: "At least one ingestion run failed for {{ $labels.source_id }} in the last 30 minutes."
+
+      - alert: TractusMindWorkerJobFailures
+        expr: increase(tractusmind_worker_jobs_total{status="failed"}[30m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          service: worker
+        annotations:
+          summary: "Background worker job failed"
+          description: "At least one TractusMind worker job failed in the last 30 minutes."
+
+      - alert: TractusMindSourceLockContention
+        expr: sum by (source_id) (increase(tractusmind_ingestion_lock_contention_total[30m])) > 3
+        for: 5m
+        labels:
+          severity: warning
+          service: ingestion
+        annotations:
+          summary: "Repeated source-sync lock contention"
+          description: "Source {{ $labels.source_id }} was skipped for lock contention more than 3 times in 30 minutes."
