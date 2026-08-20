@@ -42,19 +42,26 @@ pytest -q
 ruff check .
 ```
 
-## Source discovery
+## Source discovery and content fetching
 
-Official Tractus-X sources are allowlisted in `config/sources.toml`. Discovery resolves every repository ref to an immutable commit SHA before any content is ingested.
+Official Tractus-X sources are allowlisted in `config/sources.toml`. Discovery resolves every repository ref to an immutable commit SHA before any content is fetched.
 
 ```bash
-# Discover one source
-python scripts/discover_sources.py --source tractusx-sdk
+# Inspect the pinned manifest for a source
+tractusmind-ingest discover tractusx-sdk
 
-# Discover all enabled sources
+# Fetch three selected files from that exact commit and inspect their metadata
+tractusmind-ingest fetch tractusx-sdk --limit 3
+
+# Discover all enabled sources with the original inspection script
 python scripts/discover_sources.py
 ```
 
+Fetched files become canonical `RawDocument` objects containing a stable document ID, repository, commit SHA, blob SHA, language/content type, SHA-256 content hash, normalized UTF-8 text, and a source URL pinned to the exact commit.
+
 `GITHUB_TOKEN` is optional for public repositories, but recommended to avoid low unauthenticated API rate limits.
+
+If GitHub reports a truncated recursive tree, TractusMind refuses the ingestion instead of silently indexing an incomplete repository. Large repositories will get a selective subtree walker in a later ingestion milestone.
 
 ## Design principle
 
@@ -76,11 +83,10 @@ See [`docs/architecture.md`](docs/architecture.md) for the current architecture 
 
 ## Current milestone
 
-**V0 — Foundation / Source Discovery**
+**V0 — Foundation / Source Ingestion**
 
 - [x] FastAPI service shell
 - [x] Qdrant/PostgreSQL/Redis connectivity contract
-- [x] API liveness/readiness checks
 - [x] Background worker shell
 - [x] Docker Compose local environment
 - [x] CI lint + test
@@ -88,7 +94,9 @@ See [`docs/architecture.md`](docs/architecture.md) for the current architecture 
 - [x] Tractus-X source registry
 - [x] Version-pinned GitHub manifest discovery
 - [x] Selective file filtering and archived-source protection
-- [ ] fetch and normalize source content
+- [x] Commit-pinned content fetching
+- [x] Canonical RawDocument metadata + content hashing
+- [x] Incomplete-tree safety guard
 - [ ] code-aware/document-aware chunking
 - [ ] first dense retrieval benchmark
 
