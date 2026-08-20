@@ -5,7 +5,8 @@ from pydantic import ValidationError
 
 from app.generation.context import GroundedContext, build_grounded_context
 from app.generation.llm import LLMGenerationError, LLMProvider
-from app.generation.models import GroundedAnswer, LLMAnswerPayload
+from app.generation.models import GroundedAnswer, LLMAnswerPayload, VerificationReport
+from app.generation.verification import ClaimVerifier
 from app.retrieval.reranked import RerankedRetrievalService
 
 _CITATION_RE = re.compile(r"\[(S\d+)\]")
@@ -29,6 +30,7 @@ class GroundedAnswerService:
         *,
         retrieval: RerankedRetrievalService,
         llm: LLMProvider,
+        verifier: ClaimVerifier,
         evidence_limit: int = 6,
         context_max_chars: int = 24_000,
         minimum_rerank_score: float | None = None,
@@ -37,6 +39,7 @@ class GroundedAnswerService:
             raise ValueError("evidence_limit must be greater than zero")
         self.retrieval = retrieval
         self.llm = llm
+        self.verifier = verifier
         self.evidence_limit = evidence_limit
         self.context_max_chars = context_max_chars
         self.minimum_rerank_score = minimum_rerank_score
@@ -57,6 +60,7 @@ class GroundedAnswerService:
                 if hit.rerank_score is not None
                 and hit.rerank_score >= self.minimum_rerank_score
             ]
+
         context = build_grounded_context(hits, max_chars=self.context_max_chars)
         if not context.blocks:
             return self._abstain(normalized, evidence_count=0)
@@ -74,12 +78,15 @@ class GroundedAnswerService:
                 abstained=True,
                 evidence_count=len(context.blocks),
                 citations=[],
+                verification=None,
                 model=self.llm.model_name,
             )
 
         citation_map = context.citations
         cited_ids = _CITATION_RE.findall(payload.answer)
-        invalid_ids = [citation_id for citation_id in cited_ids if citation_id not in citation_map]
+        invalid_ids = [
+            citation_id for citation_id in cited_ids if citation_id not in citation_map
+        ]
         declared_invalid = [
             citation_id
             for citation_id in payload.citation_ids
@@ -87,6 +94,18 @@ class GroundedAnswerService:
         ]
         if invalid_ids or declared_invalid or not cited_ids:
             return self._abstain(normalized, evidence_count=len(context.blocks))
+
+        verification = await self.verifier.verify(
+            question=normalized,
+            answer=payload.answer,
+            context=context,
+        )
+        if not verification.passed:
+            return self._abstain(
+                normalized,
+                evidence_count=len(context.blocks),
+                verification=verification,
+            )
 
         ordered_ids = list(dict.fromkeys(cited_ids))
         return GroundedAnswer(
@@ -96,6 +115,7 @@ class GroundedAnswerService:
             abstained=False,
             evidence_count=len(context.blocks),
             citations=[citation_map[citation_id] for citation_id in ordered_ids],
+            verification=verification,
             model=self.llm.model_name,
         )
 
@@ -110,7 +130,9 @@ class GroundedAnswerService:
         try:
             return LLMAnswerPayload.model_validate(json.loads(text))
         except (json.JSONDecodeError, ValidationError) as exc:
-            raise LLMGenerationError("LLM did not return the required grounded JSON") from exc
+            raise LLMGenerationError(
+                "LLM did not return the required grounded JSON"
+            ) from exc
 
     def _user_prompt(self, question: str, context: GroundedContext) -> str:
         return (
@@ -119,7 +141,13 @@ class GroundedAnswerService:
             f"{context.text}"
         )
 
-    def _abstain(self, question: str, *, evidence_count: int) -> GroundedAnswer:
+    def _abstain(
+        self,
+        question: str,
+        *,
+        evidence_count: int,
+        verification: VerificationReport | None = None,
+    ) -> GroundedAnswer:
         return GroundedAnswer(
             question=question,
             answer=_ABSTAIN_MESSAGE,
@@ -127,5 +155,6 @@ class GroundedAnswerService:
             abstained=True,
             evidence_count=evidence_count,
             citations=[],
+            verification=verification,
             model=self.llm.model_name,
         )
