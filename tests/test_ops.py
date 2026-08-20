@@ -96,12 +96,12 @@ def _app() -> FastAPI:
     return app
 
 
-def test_ops_are_disabled_without_admin_key(monkeypatch) -> None:
+def test_ops_require_authentication_without_break_glass_key(monkeypatch) -> None:
     monkeypatch.setattr(ops_auth, "get_settings", lambda: Settings(ops_admin_key=None))
 
     response = TestClient(_app()).get("/v1/ops/sources")
 
-    assert response.status_code == 503
+    assert response.status_code == 401
 
 
 def test_ops_sources_expose_snapshot_and_lock_state(monkeypatch) -> None:
