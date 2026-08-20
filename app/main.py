@@ -6,9 +6,11 @@ import structlog
 from fastapi import FastAPI
 
 from app.api.routes.ask import router as ask_router
+from app.api.routes.feedback import router as feedback_router
 from app.api.routes.health import router as health_router
 from app.api.routes.metrics import router as metrics_router
 from app.api.routes.ops import router as ops_router
+from app.conversations import ConversationStore
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.infra.postgres import create_postgres_engine
@@ -27,6 +29,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.postgres = create_postgres_engine(settings)
     app.state.redis = create_redis_client(settings)
     app.state.qdrant = create_qdrant_client(settings)
+    app.state.conversation_store = ConversationStore(app.state.postgres)
     app.state.answer_service = None
     logger.info("application_started", environment=settings.app_env)
 
@@ -50,6 +53,7 @@ app = FastAPI(
 )
 app.include_router(health_router)
 app.include_router(ask_router)
+app.include_router(feedback_router)
 app.include_router(ops_router)
 app.include_router(metrics_router)
 app.middleware("http")(observe_http_request)
