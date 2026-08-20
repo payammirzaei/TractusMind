@@ -3,6 +3,7 @@ import random
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
+from threading import Lock
 from time import monotonic
 
 
@@ -32,10 +33,10 @@ class ProviderCircuitBreaker:
         self._failures = 0
         self._open_until: float | None = None
         self._probe_in_flight = False
-        self._lock = asyncio.Lock()
+        self._lock = Lock()
 
     async def before_call(self) -> None:
-        async with self._lock:
+        with self._lock:
             now = self._clock()
             if self._open_until is None:
                 return
@@ -46,14 +47,14 @@ class ProviderCircuitBreaker:
             self._probe_in_flight = True
 
     async def record_success(self) -> None:
-        async with self._lock:
+        with self._lock:
             self._failures = 0
             self._open_until = None
             self._probe_in_flight = False
 
     async def record_transient_failure(self) -> bool:
         """Record a provider availability failure and return whether the circuit opened."""
-        async with self._lock:
+        with self._lock:
             self._failures += 1
             should_open = self._probe_in_flight or self._failures >= self.failure_threshold
             self._probe_in_flight = False
@@ -63,6 +64,7 @@ class ProviderCircuitBreaker:
 
 
 _SHARED_BREAKERS: dict[tuple[str, int, float], ProviderCircuitBreaker] = {}
+_SHARED_BREAKERS_LOCK = Lock()
 
 
 def shared_provider_circuit(
@@ -72,14 +74,15 @@ def shared_provider_circuit(
     cooldown_seconds: float,
 ) -> ProviderCircuitBreaker:
     key = (provider, failure_threshold, cooldown_seconds)
-    breaker = _SHARED_BREAKERS.get(key)
-    if breaker is None:
-        breaker = ProviderCircuitBreaker(
-            provider=provider,
-            failure_threshold=failure_threshold,
-            cooldown_seconds=cooldown_seconds,
-        )
-        _SHARED_BREAKERS[key] = breaker
+    with _SHARED_BREAKERS_LOCK:
+        breaker = _SHARED_BREAKERS.get(key)
+        if breaker is None:
+            breaker = ProviderCircuitBreaker(
+                provider=provider,
+                failure_threshold=failure_threshold,
+                cooldown_seconds=cooldown_seconds,
+            )
+            _SHARED_BREAKERS[key] = breaker
     return breaker
 
 
