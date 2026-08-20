@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 
 from app.api.ops_auth import require_ops_admin
@@ -85,6 +85,22 @@ async def interactions(
         limit=limit,
     )
     return [_response(record) for record in records]
+
+
+@router.get("/interactions/{interaction_id}", response_model=InteractionOpsStatus)
+async def interaction(
+    interaction_id: UUID,
+    request: Request,
+) -> InteractionOpsStatus:
+    record = await request.app.state.conversation_store.get_interaction(
+        str(interaction_id)
+    )
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Unknown interaction id",
+        )
+    return _response(record)
 
 
 @router.get("/feedback/summary", response_model=FeedbackSummary)
