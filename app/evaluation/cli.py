@@ -10,6 +10,7 @@ from app.evaluation.benchmark import aggregate_metrics, evaluate_case, load_benc
 from app.infra.qdrant import create_qdrant_client
 from app.reranking.service import CrossEncoderReranker
 from app.retrieval.hybrid import HybridRetrievalService
+from app.retrieval.reranked import RerankedRetrievalService
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -42,13 +43,21 @@ def _services(settings: Settings):
             batch_size=settings.sparse_embedding_batch_size,
         ),
     )
-    reranker = CrossEncoderReranker(settings.reranker_model)
-    return qdrant, retrieval, reranker
+    reranked = RerankedRetrievalService(
+        retrieval=retrieval,
+        reranker=CrossEncoderReranker(
+            settings.reranker_model,
+            batch_size=settings.reranker_batch_size,
+        ),
+        candidate_k=settings.retrieval_top_k,
+        prefetch_k=max(settings.hybrid_prefetch_k, settings.retrieval_top_k),
+    )
+    return qdrant, retrieval, reranked
 
 
 async def _search_mode(
     retrieval: HybridRetrievalService,
-    reranker: CrossEncoderReranker,
+    reranked: RerankedRetrievalService,
     question: str,
     mode: str,
     k: int,
@@ -62,19 +71,12 @@ async def _search_mode(
             limit=k,
             prefetch_limit=settings.hybrid_prefetch_k,
         )
-
-    candidate_k = max(settings.retrieval_top_k, k)
-    candidates = await retrieval.search_hybrid(
-        question,
-        limit=candidate_k,
-        prefetch_limit=max(settings.hybrid_prefetch_k, candidate_k),
-    )
-    return await reranker.rerank(question, candidates, limit=k)
+    return await reranked.search(question, limit=k)
 
 
 async def _run_mode(
     retrieval: HybridRetrievalService,
-    reranker: CrossEncoderReranker,
+    reranked: RerankedRetrievalService,
     cases,
     mode: str,
     k: int,
@@ -85,7 +87,7 @@ async def _run_mode(
     for case in cases:
         hits = await _search_mode(
             retrieval,
-            reranker,
+            reranked,
             case.question,
             mode,
             k,
@@ -125,13 +127,13 @@ async def _run_mode(
 async def _run(args: argparse.Namespace) -> None:
     settings = get_settings()
     cases = load_benchmark(args.dataset)
-    qdrant, retrieval, reranker = _services(settings)
+    qdrant, retrieval, reranked = _services(settings)
     modes = ("dense", "hybrid", "rerank") if args.mode == "all" else (args.mode,)
     try:
         reports = [
             await _run_mode(
                 retrieval,
-                reranker,
+                reranked,
                 cases,
                 mode,
                 args.k,
