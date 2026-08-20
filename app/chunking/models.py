@@ -22,6 +22,7 @@ class KnowledgeChunk(BaseModel):
     source_id: str
     repository: str
     component: str
+    version_ref: str = "main"
     commit_sha: str
     path: str
     blob_sha: str
@@ -84,6 +85,7 @@ def make_chunk(
         source_id=document.source_id,
         repository=document.repository,
         component=document.component,
+        version_ref=document.version_ref,
         commit_sha=document.commit_sha,
         path=document.path,
         blob_sha=document.blob_sha,
