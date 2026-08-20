@@ -11,6 +11,7 @@ from app.ingestion.pipeline import SourceIngestionPipeline
 from app.ingestion.registry import get_source
 from app.reranking.service import CrossEncoderReranker
 from app.retrieval.hybrid import HybridRetrievalService
+from app.retrieval.reranked import RerankedRetrievalService
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -45,7 +46,7 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _retrieval_service(settings: Settings):
+def _retrieval_services(settings: Settings):
     qdrant = create_qdrant_client(settings)
     retrieval = HybridRetrievalService(
         qdrant=qdrant,
@@ -59,11 +60,20 @@ def _retrieval_service(settings: Settings):
             batch_size=settings.sparse_embedding_batch_size,
         ),
     )
-    return qdrant, retrieval
+    reranked = RerankedRetrievalService(
+        retrieval=retrieval,
+        reranker=CrossEncoderReranker(
+            settings.reranker_model,
+            batch_size=settings.reranker_batch_size,
+        ),
+        candidate_k=settings.retrieval_top_k,
+        prefetch_k=max(settings.hybrid_prefetch_k, settings.retrieval_top_k),
+    )
+    return qdrant, retrieval, reranked
 
 
 async def _run_search(args: argparse.Namespace, settings: Settings) -> None:
-    qdrant, retrieval = _retrieval_service(settings)
+    qdrant, retrieval, reranked = _retrieval_services(settings)
     try:
         if args.mode == "dense":
             hits = await retrieval.search_dense(args.query, limit=args.limit)
@@ -74,17 +84,7 @@ async def _run_search(args: argparse.Namespace, settings: Settings) -> None:
                 prefetch_limit=settings.hybrid_prefetch_k,
             )
         else:
-            candidate_k = max(settings.retrieval_top_k, args.limit)
-            candidates = await retrieval.search_hybrid(
-                args.query,
-                limit=candidate_k,
-                prefetch_limit=max(settings.hybrid_prefetch_k, candidate_k),
-            )
-            hits = await CrossEncoderReranker(settings.reranker_model).rerank(
-                args.query,
-                candidates,
-                limit=args.limit,
-            )
+            hits = await reranked.search(args.query, limit=args.limit)
     finally:
         await qdrant.close()
 
@@ -163,7 +163,7 @@ async def _run(args: argparse.Namespace) -> None:
             chunks = SmartChunker().chunk_many(documents)
 
             if args.command == "index":
-                qdrant, retrieval = _retrieval_service(settings)
+                qdrant, retrieval, _ = _retrieval_services(settings)
                 try:
                     indexed = await retrieval.index(
                         chunks,
