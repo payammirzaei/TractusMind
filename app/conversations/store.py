@@ -3,13 +3,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.conversations.history import ConversationTurn
 from app.conversations.models import AnswerFeedback, AnswerInteraction, Conversation
+from app.db import verify_database_revision
 from app.generation.models import GroundedAnswer
-from app.state.models import Base
 
 
 class ConversationAccessError(RuntimeError):
@@ -79,20 +79,7 @@ class ConversationStore:
         async with self._schema_lock:
             if self._schema_ready:
                 return
-            async with self.engine.begin() as connection:
-                await connection.run_sync(Base.metadata.create_all)
-                await connection.execute(
-                    text(
-                        "ALTER TABLE conversation "
-                        "ADD COLUMN IF NOT EXISTS owner_user_id VARCHAR(36)"
-                    )
-                )
-                await connection.execute(
-                    text(
-                        "CREATE INDEX IF NOT EXISTS ix_conversation_owner_user_id "
-                        "ON conversation (owner_user_id)"
-                    )
-                )
+            await verify_database_revision(self.engine)
             self._schema_ready = True
 
     async def assert_conversation_access(
