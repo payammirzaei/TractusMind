@@ -8,7 +8,9 @@ from app.ingestion.registry import get_enabled_sources, get_source
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Discover version-pinned Tractus-X source manifests")
+    parser = argparse.ArgumentParser(
+        description="Discover version-pinned Tractus-X source manifests"
+    )
     parser.add_argument(
         "--source",
         action="append",
