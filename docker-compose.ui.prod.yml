@@ -4,6 +4,7 @@ services:
     build: ./frontend
     environment:
       TRACTUSMIND_API_URL: http://api:8000
+      TRACTUSMIND_OIDC_ENABLED: ${OIDC_ENABLED:-false}
       TRACTUSMIND_OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}
       TRACTUSMIND_OIDC_CLIENT_ID: ${TRACTUSMIND_OIDC_CLIENT_ID:-}
       TRACTUSMIND_OIDC_SCOPES: ${TRACTUSMIND_OIDC_SCOPES:-openid profile email}
