@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.conversations.models import AnswerFeedback, AnswerInteraction, Conversation
@@ -24,6 +24,31 @@ class FeedbackRecord:
     rating: str
     reason: str | None
     comment: str | None
+
+
+@dataclass(frozen=True)
+class InteractionRecord:
+    interaction_id: str
+    conversation_id: str
+    question: str
+    answer: str | None
+    status: str
+    grounded: bool
+    abstained: bool
+    evidence_count: int
+    model: str | None
+    intent: str | None
+    route_json: dict[str, object] | None
+    citations_json: list[dict[str, object]] | None
+    verification_json: dict[str, object] | None
+    stage_durations_json: dict[str, float] | None
+    total_duration_seconds: float | None
+    trace_id: str | None
+    error_type: str | None
+    created_at: datetime
+    feedback_rating: str | None
+    feedback_reason: str | None
+    feedback_comment: str | None
 
 
 class ConversationStore:
@@ -185,3 +210,73 @@ class ConversationStore:
                 reason=feedback.reason,
                 comment=feedback.comment,
             )
+
+    async def list_interactions(
+        self,
+        *,
+        conversation_id: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[InteractionRecord]:
+        await self.ensure_schema()
+        statement = (
+            select(AnswerInteraction, AnswerFeedback)
+            .outerjoin(
+                AnswerFeedback,
+                AnswerFeedback.interaction_id == AnswerInteraction.interaction_id,
+            )
+            .order_by(AnswerInteraction.created_at.desc())
+            .limit(limit)
+        )
+        if conversation_id is not None:
+            statement = statement.where(
+                AnswerInteraction.conversation_id == conversation_id
+            )
+        if status is not None:
+            statement = statement.where(AnswerInteraction.status == status)
+
+        async with self.sessions() as session:
+            rows = (await session.execute(statement)).all()
+
+        return [self._interaction_record(interaction, feedback) for interaction, feedback in rows]
+
+    async def feedback_counts(self) -> dict[str, int]:
+        await self.ensure_schema()
+        async with self.sessions() as session:
+            rows = (
+                await session.execute(
+                    select(AnswerFeedback.rating, func.count())
+                    .group_by(AnswerFeedback.rating)
+                    .order_by(AnswerFeedback.rating)
+                )
+            ).all()
+        return {str(rating): int(count) for rating, count in rows}
+
+    def _interaction_record(
+        self,
+        interaction: AnswerInteraction,
+        feedback: AnswerFeedback | None,
+    ) -> InteractionRecord:
+        return InteractionRecord(
+            interaction_id=interaction.interaction_id,
+            conversation_id=interaction.conversation_id,
+            question=interaction.question,
+            answer=interaction.answer,
+            status=interaction.status,
+            grounded=interaction.grounded,
+            abstained=interaction.abstained,
+            evidence_count=interaction.evidence_count,
+            model=interaction.model,
+            intent=interaction.intent,
+            route_json=interaction.route_json,
+            citations_json=interaction.citations_json,
+            verification_json=interaction.verification_json,
+            stage_durations_json=interaction.stage_durations_json,
+            total_duration_seconds=interaction.total_duration_seconds,
+            trace_id=interaction.trace_id,
+            error_type=interaction.error_type,
+            created_at=interaction.created_at,
+            feedback_rating=feedback.rating if feedback else None,
+            feedback_reason=feedback.reason if feedback else None,
+            feedback_comment=feedback.comment if feedback else None,
+        )
