@@ -1,0 +1,14 @@
+version = 1
+
+[contracts]
+# These are product safety contracts, not tuned benchmark targets.
+max_unsafe_answer_rate = 0.0
+max_unsafe_evidence_accept_rate = 0.0
+require_all_reviewed_regressions = true
+
+[calibration]
+# Keep this strict so a new calibration cannot silently replace the production threshold.
+threshold_tolerance = 0.000001
+
+# Intentionally omitted until a full-corpus calibration is run against the production index:
+# minimum_relevance_score = <measured value>
