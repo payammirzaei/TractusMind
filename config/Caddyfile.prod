@@ -1,0 +1,28 @@
+{
+    admin off
+    email {$ACME_EMAIL}
+}
+
+{$TRACTUSMIND_DOMAIN} {
+    encode zstd gzip
+
+    header {
+        -Server
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    }
+
+    reverse_proxy api:8000 {
+        health_uri /health/live
+        health_interval 30s
+        health_timeout 5s
+    }
+
+    log {
+        output stdout
+        format json
+    }
+}
