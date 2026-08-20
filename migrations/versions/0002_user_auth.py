@@ -6,8 +6,8 @@ Revises: 0001_core_schema
 
 from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision: str = "0002_user_auth"
 down_revision: str | Sequence[str] | None = "0001_core_schema"
@@ -60,7 +60,11 @@ def upgrade() -> None:
 
     user_indexes = _index_names("app_user")
     if "ix_app_user_api_key_prefix" not in user_indexes:
-        op.create_index("ix_app_user_api_key_prefix", "app_user", ["api_key_prefix"])
+        op.create_index(
+            "ix_app_user_api_key_prefix",
+            "app_user",
+            ["api_key_prefix"],
+        )
     if "ix_app_user_api_key_hash" not in user_indexes:
         op.create_index(
             "ix_app_user_api_key_hash",
@@ -105,7 +109,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    if "conversation" in _table_names() and "owner_user_id" in _column_names("conversation"):
+    has_owner = (
+        "conversation" in _table_names()
+        and "owner_user_id" in _column_names("conversation")
+    )
+    if has_owner:
         foreign_keys = sa.inspect(op.get_bind()).get_foreign_keys("conversation")
         for foreign_key in foreign_keys:
             if foreign_key.get("constrained_columns") != ["owner_user_id"]:
