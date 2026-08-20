@@ -1,250 +1,158 @@
 # Architecture
 
-TractusMind is designed as a source-grounded engineering copilot rather than a generic chatbot.
-The production-shaped deployment separates request serving, identity, scheduled ingestion,
-ingestion work, retrieval storage, application state, job orchestration, metrics, traces, and
-interaction history.
+TractusMind is a source-grounded engineering copilot, not a generic chatbot. The system is designed
+around provenance, reproducible retrieval, fail-closed grounding, measured quality, and explicit
+production boundaries.
+
+## Production topology
 
 ```text
-Public Internet
-      |
-      v
- FastAPI API --------------------> OTLP Collector (optional)
-      |                                  |
-      |                                  v
-      |                             Trace backend
-      |
-      +---------------------- private network ----------------------+
-      |                    |             |             |            |
-      v                    v             v             v            v
- Scheduler -> Redis -> Ingestion Worker  Qdrant     PostgreSQL    Redis
-    |                    |                  |           |
-    |                    |             Dense + Sparse  +-- users / hashed API keys
-    |                    |               Retrieval     +-- source/file state
-    |                    v                             +-- ingestion runs
-    |             Incremental Sync                    +-- owned conversations
-    |                                                +-- answer interactions
-    |                                                +-- feedback
-    |                                                +-- quality reviews
-    |                                                +-- regression cases
-    +--------- metrics --+---------> Prometheus
-              API metrics ---------> Prometheus
-              Dramatiq metrics ----> Prometheus
+Internet
+   |
+   | TLS 443
+   v
+ Caddy
+   |
+   v
+ FastAPI API -----------------------> OIDC Provider / JWKS
+   |   \----------------------------> LLM provider
+   |
+   +---------------- private backend ----------------+
+   |                |               |                |
+PostgreSQL        Redis           Qdrant         Prometheus
+   ^                ^               ^                |
+   |                |               |            Alertmanager
+   |             Dramatiq           |                |
+   |                |               |             Grafana
+   |             Worker ------------+
+   |                |
+   |                +---------------------------> GitHub
+   |
+Scheduler ----------+
 ```
 
-## Responsibilities
+PostgreSQL, Redis, and Qdrant are not public services. The API and worker have outbound provider
+egress without exposing backend ports.
 
-- **FastAPI**: grounded query API, bearer user authentication, owned conversation/history API,
-  feedback API, health endpoints, protected operations API, request correlation, Prometheus API
-  metrics, and optional OpenTelemetry tracing.
-- **Scheduler**: periodically enqueue all enabled source IDs; it never performs ingestion work.
-- **Worker**: source locks, crawling, parsing, code-aware chunking, embeddings, incremental indexing,
-  and worker/model metrics.
-- **Qdrant**: dense/sparse vectors, exact debug payload indexes, snapshot metadata, and chunks.
-- **PostgreSQL**: user credential hashes, source/file state, ingestion runs, evaluations,
-  conversations, answer traces, citations/verification snapshots, feedback, quality reviews, and
-  reviewed regression cases.
-- **Redis**: Dramatiq queue, distributed per-source ingestion locks, and short-lived cache.
-- **Prometheus**: API, RAG-stage, local-model, ingestion, scheduler, and native Dramatiq metrics.
-- **OpenTelemetry**: optional API/request and RAG-stage traces exported over OTLP/HTTP.
-- **S3-compatible storage**: immutable/raw source snapshots and ingestion artifacts.
+## Identity boundary
 
-## Background ingestion path
+Two bearer mechanisms resolve into the same `UserIdentity` and `app_user` ownership model:
 
 ```text
-scheduler tick
-  -> enabled sources from config/sources.toml
-  -> Dramatiq messages in Redis
-  -> one worker job per source
-  -> non-blocking Redis distributed source lock
-  -> GitHub manifest discovery
-  -> PostgreSQL previous source/file state
-  -> blob-SHA delta plan
-  -> fetch/chunk/embed only added + modified files
-  -> Qdrant upsert/update/delete
-  -> commit successful source/file state + ingestion_run
+API key: tm_...
+      or
+OIDC access token
+      ↓
+authentication
+      ↓
+app_user
+      ↓
+role: user / operator / admin
+      ↓
+conversation ownership + RBAC
 ```
 
-The default scheduler interval is six hours and is configurable with
-`SOURCE_SYNC_INTERVAL_SECONDS`. Per-source distributed locks prevent simultaneous synchronization
-of the same source across worker replicas. The default lock TTL is twelve hours and is configurable
-with `SOURCE_SYNC_LOCK_SECONDS`.
+### API-key identities
 
-The default Compose worker runs one thread because an ingestion task may load dense, sparse, and
-reranking models. Horizontal scaling remains possible because the source lock is shared through
-Redis.
+API keys are generated with strong random material. PostgreSQL stores only SHA-256 digests and a
+short non-secret prefix. API-key roles are locally managed.
 
-## Production query path
+### OIDC identities
+
+OIDC uses standard discovery and JWKS validation. The configured issuer must match discovery,
+access tokens require `iss`, `sub`, and `exp`, the configured audience is verified, algorithms are
+allowlisted, and the JWT `kid` must resolve to a signing key. Unknown keys trigger one JWKS refresh
+for normal provider key rotation.
+
+A verified external identity is persisted by unique `(issuer, subject)`. This gives it a stable
+TractusMind `user_id` across token refreshes and keeps existing conversation foreign keys unchanged.
+
+OIDC role claims map to `user`, `operator`, or `admin`. External roles remain identity-provider
+managed; local TractusMind administration may disable the identity but cannot override its role.
+
+`OPS_ADMIN_KEY` is retained only as break-glass admin access.
+
+## RBAC
+
+```text
+user
+  -> ask / owned conversations / feedback
+
+operator
+  -> user capabilities
+  -> read source/run/interaction/quality operations
+
+admin
+  -> operator capabilities
+  -> trigger source synchronization
+  -> dismiss/promote quality reviews
+  -> create/rotate/disable API-key users
+  -> assign API-key roles
+```
+
+`admin` inherits `operator`. Authentication is cached only for the lifetime of one HTTP request so
+nested FastAPI dependencies do not repeat JWT verification.
+
+## Query path
 
 ```text
 request
-  -> optional bearer API-key authentication
-  -> conversation ownership check when conversation_id is supplied
-  -> bounded completed history only for authenticated owner
+  -> optional API-key/OIDC authentication
+  -> conversation ownership check when conversation_id is present
+  -> bounded completed history for authenticated owner
   -> current question
-  -> contextual follow-up rewrite only when deterministic rule says history is needed
-  -> deterministic query router
-  -> intent + source/version/ref/commit route
-  -> Qdrant payload filter
-  -> dense + BM25 retrieval
+  -> deterministic follow-up context rule when needed
+  -> deterministic query routing
+  -> source/ref/version/snapshot filter
+  -> dense retrieval + BM25 sparse retrieval
   -> exact debug lane when applicable
   -> RRF fusion
   -> cross-encoder reranking
-  -> evidence threshold
-  -> grounded generation with history marked context-only
-  -> citation validation
-  -> claim verification against current evidence
-  -> final answer or abstention
-  -> persist owned/anonymous interaction + citations + verification + timing trace
+  -> calibrated evidence threshold
+  -> bounded source context
+  -> grounded generation
+  -> backend citation validation
+  -> atomic claim verification against current evidence
+  -> answer or abstention
+  -> persisted interaction / trace / citations / verification
   -> optional ownership-checked feedback
 ```
 
-The router currently recognizes SDK, EDC, DTR, semantic-model, release/version, debugging, and
-general queries. Source filters are deliberately deterministic so routing decisions can be
-inspected and benchmarked without adding another LLM call.
+History is conversational context only. Previous assistant answers are never retrieval/source
+evidence and cannot bypass citation or claim verification.
 
-Semantic release versions such as `24.05` are extracted and preserved in the route but are not
-used as a hard payload filter because a release repository can document several releases at the
-same indexed ref. Explicit `ref:` and `commit:` constraints are hard filters and fail closed when
-that indexed provenance is unavailable.
-
-## Authentication and conversation ownership
-
-The first user identity adapter uses opaque bearer API keys. An administrator creates or rotates a
-key through the protected operations API. The plaintext token is returned once; PostgreSQL stores
-only a SHA-256 digest and short prefix.
+## Source ingestion path
 
 ```text
-Authorization: Bearer tm_<random-token>
-          |
-          v
-       SHA-256
-          |
-          v
-app_user.api_key_hash + enabled flag
-          |
-          v
-       user_id
+scheduler tick
+  -> enabled source IDs from config/sources.toml
+  -> Redis / Dramatiq
+  -> worker
+  -> per-source distributed lock
+  -> resolve GitHub ref to immutable commit
+  -> discover allowlisted files
+  -> compare blob SHA state
+  -> fetch/chunk/embed added + modified files only
+  -> Qdrant upsert/update/delete
+  -> persist successful PostgreSQL source/file/run state
 ```
 
-Authenticated conversations store `owner_user_id`. Access is fail-closed: a mismatched owner gets
-`404`, not `403`, so the API does not reveal another user's conversation existence. Existing
-anonymous conversations remain anonymous and are not automatically claimed.
-
-Only authenticated owned conversations can contribute history to generation. Anonymous requests
-remain supported, but anonymous history is never injected into a prompt.
-
-History selection is bounded by `HISTORY_MAX_TURNS` and `HISTORY_MAX_CHARS`, and only completed
-interactions are eligible. For likely follow-ups, the previous **user question** can be prepended to
-the retrieval query. Previous assistant answers remain generation context only and never become
-retrieval/source evidence.
-
-The system prompt labels conversation history as untrusted context that must not be cited. Backend
-citation validation and claim verification continue to operate exclusively on the current retrieved
-source evidence.
-
-See [`authenticated-conversations.md`](authenticated-conversations.md).
-
-## Conversation and trace persistence
-
-`conversation` groups related requests by an opaque UUID and optionally stores `owner_user_id`.
-`answer_interaction` stores an immutable snapshot of a completed or failed answer request, including
-route, citations, verification result, model, grounded/abstained outcome, request-local stage
-durations, total duration, and OpenTelemetry trace ID when available.
-
-The request-local timing collector is backed by `contextvars`, so concurrent API requests do not
-share stage data. Prometheus remains the aggregate metric system; PostgreSQL stores the trace
-snapshot needed to inspect one specific production answer.
-
-`answer_feedback` stores one mutable `up` or `down` record per completed interaction. Re-submission
-updates the same record. Feedback for an authenticated conversation is accepted only from the
-conversation owner. Protected ops endpoints retain cross-user administrative inspection.
-
-See [`conversation-feedback.md`](conversation-feedback.md).
-
-## Feedback-driven quality loop
-
-Production failures and negative feedback feed a human-reviewed quality path:
+Provenance distinguishes:
 
 ```text
-failed interaction ---------+
-                            +-> quality_review (pending)
-down-voted interaction -----+          |
-                                       v
-                             human root-cause review
-                              /                 \
-                         dismiss              promote
-                                                |
-                                                v
-                                      regression_case
-                                                |
-                                                v
-                                      benchmark NDJSON export
-                                                |
-                                                v
-                                       repository code review
+snapshot_commit_sha = repository snapshot membership
+commit_sha          = exact commit containing cited content
 ```
 
-Capture is concurrency-safe and idempotent per interaction/trigger. Raw feedback never becomes a
-gold benchmark automatically. Promotion requires an administrator to classify the root cause and
-provide expected evidence or expected abstention. Final review decisions cannot be changed into a
-contradictory state.
+Unchanged files can move to a newer repository snapshot without weakening exact content/citation
+provenance.
 
-Promoted cases retain their production interaction ID and route snapshot. Benchmark export is
-split by benchmark kind so retrieval/debug rows and answer-evaluation rows remain compatible with
-the existing loaders.
+## Retrieval contract
 
-See [`quality-loop.md`](quality-loop.md).
+Normal queries use dense + BM25 hybrid retrieval, RRF fusion, and cross-encoder reranking. Debug
+queries add exact phrase/symbol/parent/path/config retrieval before weighted fusion.
 
-## Production evaluation gate
-
-The production quality gate separates deterministic CI contracts from live-corpus evaluation.
-Normal CI always tests gate logic. A dedicated quality workflow uses the real Qdrant corpus and LLM
-when configured.
-
-Hard invariants include zero unsafe-answer rate, zero unsafe evidence acceptance after calibration,
-and 100% pass for human-reviewed regression cases. Seed retrieval metrics remain report-only until
-full-corpus baselines are measured and versioned rather than guessed.
-
-The calibrated minimum relevance threshold is expected to be explicitly reviewed and pinned. A
-future calibration that materially drifts from the pinned threshold is a gate violation rather than
-a silent production behavior change.
-
-See [`quality-gate.md`](quality-gate.md).
-
-## Observability contract
-
-Prometheus metrics and OpenTelemetry traces observe the same production paths rather than a second
-instrumentation-only implementation.
-
-API metrics use FastAPI route templates instead of raw paths. Pipeline metrics use bounded labels
-such as stage and query intent. Ingestion metrics may use source IDs because source IDs come from
-the finite allowlisted registry. Arbitrary question text, source code, error bodies, paths, commit
-SHAs, chunk IDs, request IDs, trace IDs, credentials, and authorization headers are never metric
-labels.
-
-The local Compose topology scrapes:
-
-```text
-api:8000/metrics       -> HTTP + RAG pipeline metrics
-worker:9101/metrics    -> TractusMind worker/ingestion/model metrics
-worker:9191/           -> native Dramatiq queue/runtime metrics
-scheduler:9102/metrics -> scheduler enqueue metrics
-```
-
-OpenTelemetry export is optional. When `OTEL_TRACES_ENDPOINT` is configured, FastAPI creates the
-request/server span and TractusMind adds child spans for retrieval, generation, and verification.
-Without an endpoint there is no OTLP exporter dependency at runtime.
-
-Each normal API response receives an `X-Request-ID`. The request ID is also bound to structured
-logs; when an OpenTelemetry span is active its trace ID is bound as well. These correlation IDs are
-kept out of metric labels.
-
-See [`observability.md`](observability.md) for metric families, security rules, and example PromQL.
-
-## Provenance contract
-
-Incremental ingestion distinguishes the repository snapshot from the exact content commit:
+Every hit can carry:
 
 ```text
 source_id
@@ -252,38 +160,113 @@ repository
 component
 version_ref
 snapshot_commit_sha
-commit_sha            # exact content/citation commit
-path
-blob_sha
-chunk_id
-line range
+commit_sha
+path / line range
+symbol / parent symbol / section
+retrieval methods and scores
 source URL
 ```
 
-An unchanged file does not need to be downloaded or embedded when the repository advances. Its
-Qdrant `snapshot_commit_sha` is moved to the new repository snapshot while `commit_sha` and its
-commit-pinned citation URL continue to identify the exact immutable content that was originally
-fetched. This lets `commit:<sha>` select a complete repository snapshot without weakening exact
-citation provenance.
+Explicit `ref:` and `commit:` constraints fail closed when that indexed provenance is unavailable.
 
-## Retrieval direction
+## Persistence
 
-The retrieval pipeline evolves deliberately:
+PostgreSQL owns durable application state:
 
-1. Dense baseline
-2. Dense + sparse hybrid retrieval
-3. RRF fusion
-4. Cross-encoder reranking
-5. Version- and metadata-aware routing/filtering
-6. Debugging-specific exact-search lane
-7. Incremental source state + scheduled background synchronization
-8. Production observability and measured quality calibration
-9. Persisted conversations, answer traces, and user feedback
-10. Human-reviewed feedback/failure promotion into regression benchmarks
-11. Production evaluation gates over reviewed regressions and measured calibration
-12. Authenticated user-owned bounded conversation history
-13. Code-aware and graph-enhanced retrieval only when benchmark results justify it
+- API-key and OIDC identities + role/enable state
+- source/file ingestion state and runs
+- owned conversations
+- answer interactions and trace snapshots
+- citations and verification snapshots
+- feedback
+- quality reviews
+- reviewed regression cases
 
-Every answer should remain traceable to identity/ownership state when present,
-repository/file/version/snapshot/content commit/chunk, retrieval evidence, verification result,
-persisted interaction, optional feedback, and any reviewed regression case derived from it.
+The current Alembic chain is:
+
+```text
+0001_core_schema
+  -> 0002_user_auth
+  -> 0003_oidc_rbac
+```
+
+Runtime code does not create or alter PostgreSQL tables.
+
+## Quality loop
+
+```text
+failed answer / down-vote
+          ↓
+ pending quality review
+          ↓
+     human root cause
+       /       \
+  dismiss    promote
+                ↓
+         regression case
+                ↓
+         reviewed benchmark
+                ↓
+         production gate
+```
+
+Raw feedback is never automatically promoted to gold data.
+
+## Full-corpus validation
+
+A production benchmark is considered valid only after the corpus contract verifies every enabled
+source across PostgreSQL and Qdrant, with optional upstream GitHub freshness validation.
+
+The V20 workflow records source snapshots, upstream commits, model identities, input hashes,
+retrieval/answer metrics, and the measured calibration threshold. Thresholds are proposed as
+artifacts and require human review before they are pinned.
+
+## Observability
+
+Prometheus observes API/RAG/provider/model/worker/ingestion/quality paths. Grafana dashboards are
+provisioned from the repository and Alertmanager evaluates repository-owned alerts. OpenTelemetry
+traces are optional and exported only when an OTLP endpoint is configured.
+
+Request IDs and trace IDs belong in logs/traces, not metric labels. Questions, source text, secrets,
+raw paths, commit hashes, and error bodies are not used as unbounded metric labels.
+
+## Production hardening
+
+The production Compose topology adds:
+
+- Caddy TLS edge and security headers
+- TrustedHost/CORS policy
+- body-size, concurrency, and process-local rate guards
+- Docker secret-file configuration
+- read-only application roots and dropped capabilities
+- `no-new-privileges`
+- resource limits and graceful shutdown
+- pinned infrastructure image tags
+- PostgreSQL backup/guarded restore
+- Trivy repository/image scanning
+- tagged GHCR images with SBOM/provenance
+
+## Inspectability principle
+
+A production answer remains explainable as:
+
+```text
+identity + role
+  -> owned history eligibility
+  -> question
+  -> route
+  -> source/ref/snapshot filter
+  -> candidate lanes and scores
+  -> fusion + reranking
+  -> evidence threshold
+  -> final evidence
+  -> provider request/retry path
+  -> answer
+  -> citations
+  -> verification verdicts
+  -> persisted interaction + trace
+  -> optional feedback/review/regression
+```
+
+No hidden RAG magic: each stage is intended to be inspectable, testable, and replaceable without
+changing the provenance contract.
