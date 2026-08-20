@@ -37,12 +37,34 @@ jobs:
         run: python -m pip install -e ".[dev]"
       - name: Lint
         run: ruff check .
-      - name: Migrate database
-        run: tractusmind-db upgrade
+      - name: Bootstrap database
+        run: tractusmind-db bootstrap
       - name: Check database revision
         run: tractusmind-db check
       - name: Test
         run: pytest -q
+      - name: Legacy adoption smoke test
+        run: |
+          python - <<'PY'
+          import asyncio
+
+          from sqlalchemy import text
+
+          from app.core.config import get_settings
+          from app.infra.postgres import create_postgres_engine
+
+          async def main() -> None:
+              engine = create_postgres_engine(get_settings())
+              try:
+                  async with engine.begin() as connection:
+                      await connection.execute(text("DROP TABLE alembic_version"))
+              finally:
+                  await engine.dispose()
+
+          asyncio.run(main())
+          PY
+          tractusmind-db bootstrap
+          tractusmind-db check
       - name: Migration rollback smoke test
         run: |
           tractusmind-db downgrade 0001_core_schema
