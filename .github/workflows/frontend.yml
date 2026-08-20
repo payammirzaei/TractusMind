@@ -97,6 +97,7 @@ jobs:
           trap cleanup EXIT
           npm run smoke
           npm run smoke:bff
+          npm run smoke:oidc-disabled
 
       - name: Validate development UI topology
         run: >-
