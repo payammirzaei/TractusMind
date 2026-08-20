@@ -52,6 +52,9 @@ jobs:
       - name: Install
         run: python -m pip install -e ".[dev]"
 
+      - name: Bootstrap quality database schema
+        run: tractusmind-db bootstrap
+
       - name: Prepare validation artifacts
         run: mkdir -p artifacts/full-corpus artifacts/full-corpus/sync
 
@@ -76,9 +79,9 @@ jobs:
               | tee "artifacts/full-corpus/sync/${source_id}.json"
           done < artifacts/full-corpus/enabled-sources.txt
 
-      - name: Validate full corpus snapshot
+      - name: Validate complete and current corpus snapshot
         run: >-
-          tractusmind-corpus-validate
+          tractusmind-corpus-validate --verify-upstream
           > artifacts/full-corpus/corpus.json
 
       - name: Run six-source retrieval benchmark
@@ -104,7 +107,7 @@ jobs:
             --max-unsafe-rate 0 \
             > artifacts/full-corpus/calibration.json
 
-      - name: Use measured threshold for candidate answer evaluation
+      - name: Load measured threshold
         shell: bash
         run: |
           python - <<'PY'
@@ -117,6 +120,9 @@ jobs:
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
               handle.write(f"MINIMUM_RELEVANCE_SCORE={threshold:.6f}\n")
           PY
+
+      - name: Run candidate answer evaluation at measured threshold
+        run: |
           tractusmind-answer-eval evaluate \
             --dataset benchmarks/answer_v1.jsonl \
             > artifacts/full-corpus/answer.json
@@ -195,6 +201,7 @@ jobs:
               "corpus": {
                   "collection_name": corpus["collection_name"],
                   "registry_sha256": corpus["registry_sha256"],
+                  "upstream_verified": corpus["upstream_verified"],
                   "sources": corpus["sources"],
               },
               "models": {
