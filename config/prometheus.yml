@@ -1,0 +1,24 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: tractusmind-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api:8000"]
+
+  - job_name: tractusmind-worker-domain
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["worker:9101"]
+
+  - job_name: tractusmind-worker-dramatiq
+    metrics_path: /
+    static_configs:
+      - targets: ["worker:9191"]
+
+  - job_name: tractusmind-scheduler
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["scheduler:9102"]
