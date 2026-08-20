@@ -1,3 +1,4 @@
+from contextvars import Token
 from time import perf_counter
 from uuid import UUID
 
@@ -88,13 +89,20 @@ async def ask(payload: AskRequest, request: Request) -> GroundedAnswer:
 async def _finish_and_persist_failure(
     request: Request,
     *,
-    token,
+    token: Token,
     question: str,
     conversation_id: str | None,
     error: Exception,
     started: float,
 ) -> None:
     trace = finish_answer_trace(token)
+    metadata = trace.metadata
+    route = metadata.get("route")
+    citations = metadata.get("citations")
+    model = metadata.get("model")
+    intent = metadata.get("intent")
+    evidence_count = metadata.get("evidence_count")
+
     try:
         await request.app.state.conversation_store.record_failure(
             question=question,
@@ -103,6 +111,11 @@ async def _finish_and_persist_failure(
             stage_durations=trace.stage_durations,
             total_duration_seconds=perf_counter() - started,
             trace_id=current_trace_id(),
+            model=model if isinstance(model, str) else None,
+            intent=intent if isinstance(intent, str) else None,
+            route_json=route if isinstance(route, dict) else None,
+            citations_json=citations if isinstance(citations, list) else None,
+            evidence_count=evidence_count if isinstance(evidence_count, int) else 0,
         )
     except Exception as exc:
         logger.exception(
