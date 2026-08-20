@@ -28,6 +28,8 @@ def _review_record(status: str = "pending") -> ReviewRecord:
         intent="sdk",
         error_type=None,
         feedback_rating="down",
+        feedback_reason="citation",
+        feedback_comment="The cited source did not support the exact claim.",
         created_at=datetime(2026, 8, 20, tzinfo=UTC),
         reviewed_at=None,
     )
@@ -53,6 +55,9 @@ def _regression_record() -> RegressionRecord:
 class FakeQualityStore:
     async def review_counts(self) -> dict[str, int]:
         return {"pending": 2, "promoted": 1}
+
+    async def regression_count(self) -> int:
+        return 1
 
     async def list_reviews(self, **_kwargs) -> list[ReviewRecord]:
         return [_review_record()]
@@ -89,6 +94,21 @@ def _headers() -> dict[str, str]:
     return {"X-TractusMind-Admin-Key": "secret"}
 
 
+def test_admin_can_read_quality_summary(monkeypatch) -> None:
+    _authorize(monkeypatch)
+
+    response = TestClient(_app()).get(
+        "/v1/ops/quality/summary",
+        headers=_headers(),
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "review_counts": {"pending": 2, "promoted": 1},
+        "regression_cases": 1,
+    }
+
+
 def test_admin_can_list_pending_quality_reviews(monkeypatch) -> None:
     _authorize(monkeypatch)
 
@@ -98,7 +118,10 @@ def test_admin_can_list_pending_quality_reviews(monkeypatch) -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()[0]["feedback_rating"] == "down"
+    payload = response.json()[0]
+    assert payload["feedback_rating"] == "down"
+    assert payload["feedback_reason"] == "citation"
+    assert "did not support" in payload["feedback_comment"]
 
 
 def test_promote_requires_expected_evidence_for_answerable_case(monkeypatch) -> None:
