@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 
-const COOKIE = "tm_session";
+import { SESSION_COOKIE_NAME } from "@/lib/server-session";
+
 const API_URL = (process.env.TRACTUSMIND_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
 const ALLOWED_V1_ROOTS = new Set(["ask", "conversations", "feedback", "me", "ops"]);
 const MAX_BODY_BYTES = 1_048_576;
@@ -10,7 +11,11 @@ type Context = { params: Promise<{ path: string[] }> };
 
 function supportedPath(path: string[]) {
   if (!path.length) return false;
-  if (path.some((part) => !part || part === "." || part === ".." || part.includes("\\"))) {
+  if (
+    path.some(
+      (part) => !part || part === "." || part === ".." || part.includes("/") || part.includes("\\"),
+    )
+  ) {
     return false;
   }
   if (path[0] === "health") return true;
@@ -60,7 +65,7 @@ async function proxy(request: Request, context: Context) {
   const incoming = new URL(request.url);
   const target = `${API_URL}/${path.map(encodeURIComponent).join("/")}${incoming.search}`;
   const store = await cookies();
-  const token = store.get(COOKIE)?.value;
+  const token = store.get(SESSION_COOKIE_NAME)?.value;
   const headers = new Headers();
   headers.set("accept", request.headers.get("accept") ?? "application/json");
   const contentType = request.headers.get("content-type");
