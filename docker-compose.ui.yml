@@ -1,0 +1,9 @@
+services:
+  frontend:
+    build: ./frontend
+    environment:
+      TRACTUSMIND_API_URL: http://api:8000
+    ports:
+      - "3100:3000"
+    depends_on:
+      - api

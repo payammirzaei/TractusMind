@@ -1,0 +1,38 @@
+services:
+  frontend:
+    image: ${TRACTUSMIND_FRONTEND_IMAGE:-tractusmind-ui:local}
+    build: ./frontend
+    environment:
+      TRACTUSMIND_API_URL: http://api:8000
+    networks: [edge, backend]
+    expose: ["3000"]
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/.next/cache
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${FRONTEND_MEMORY_LIMIT:-768m}
+    cpus: ${FRONTEND_CPU_LIMIT:-1.0}
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  caddy:
+    volumes:
+      - ./config/Caddyfile.ui.prod:/etc/caddy/Caddyfile:ro
+    depends_on:
+      frontend:
+        condition: service_healthy
