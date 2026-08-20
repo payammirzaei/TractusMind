@@ -1,15 +1,8 @@
 from fnmatch import fnmatchcase
 from pathlib import PurePosixPath
 
-import httpx
-
+from app.ingestion.github_client import GitHubApiClient, GitHubSourceError
 from app.ingestion.models import SourceDefinition, SourceFile, SourceManifest
-
-GITHUB_API_URL = "https://api.github.com"
-
-
-class GitHubSourceError(RuntimeError):
-    pass
 
 
 def _pattern_matches(path: str, pattern: str) -> bool:
@@ -47,18 +40,18 @@ def _content_type(path: str) -> str:
 
 
 class GitHubSourceScanner:
-    def __init__(self, token: str | None = None, timeout: float = 30.0) -> None:
-        headers = {
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "TractusMind",
-        }
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-        self._client = httpx.AsyncClient(base_url=GITHUB_API_URL, headers=headers, timeout=timeout)
+    def __init__(
+        self,
+        token: str | None = None,
+        timeout: float = 30.0,
+        client: GitHubApiClient | None = None,
+    ) -> None:
+        self._owns_client = client is None
+        self._client = client or GitHubApiClient(token=token, timeout=timeout)
 
     async def close(self) -> None:
-        await self._client.aclose()
+        if self._owns_client:
+            await self._client.close()
 
     async def __aenter__(self) -> "GitHubSourceScanner":
         return self
@@ -67,16 +60,16 @@ class GitHubSourceScanner:
         await self.close()
 
     async def discover(self, source: SourceDefinition) -> SourceManifest:
-        repository = await self._get_json(f"/repos/{source.full_name}")
+        repository = await self._client.get_json(f"/repos/{source.full_name}")
         archived = bool(repository.get("archived", False))
         if archived and not source.allow_archived:
             raise GitHubSourceError(f"Refusing archived source: {source.full_name}")
 
-        commit = await self._get_json(f"/repos/{source.full_name}/commits/{source.ref}")
+        commit = await self._client.get_json(f"/repos/{source.full_name}/commits/{source.ref}")
         commit_sha = str(commit["sha"])
         tree_sha = str(commit["commit"]["tree"]["sha"])
 
-        tree = await self._get_json(
+        tree = await self._client.get_json(
             f"/repos/{source.full_name}/git/trees/{tree_sha}",
             params={"recursive": "1"},
         )
@@ -113,19 +106,5 @@ class GitHubSourceScanner:
             tree_truncated=tree_truncated,
         )
 
-    async def _get_json(
-        self,
-        path: str,
-        params: dict[str, str] | None = None,
-    ) -> dict:
-        response = await self._client.get(path, params=params)
-        try:
-            response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            raise GitHubSourceError(
-                f"GitHub request failed ({response.status_code}) for {path}"
-            ) from exc
-        payload = response.json()
-        if not isinstance(payload, dict):
-            raise GitHubSourceError(f"Unexpected GitHub response for {path}")
-        return payload
+
+__all__ = ["GitHubSourceError", "GitHubSourceScanner"]
