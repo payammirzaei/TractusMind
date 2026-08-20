@@ -73,6 +73,18 @@ def _retrieval_services(settings: Settings):
     return qdrant, retrieval, reranked
 
 
+def _source_pipeline(settings: Settings) -> SourceIngestionPipeline:
+    return SourceIngestionPipeline(
+        token=settings.github_token,
+        timeout=settings.github_timeout_seconds,
+        max_attempts=settings.github_max_attempts,
+        retry_base_seconds=settings.provider_retry_base_seconds,
+        retry_max_seconds=settings.provider_retry_max_seconds,
+        circuit_failure_threshold=settings.provider_circuit_failure_threshold,
+        circuit_cooldown_seconds=settings.provider_circuit_cooldown_seconds,
+    )
+
+
 def _enqueue_source_ids(source_ids: list[str]) -> None:
     from app.workers.tasks import sync_source_task
 
@@ -174,7 +186,7 @@ async def _run_sync(args: argparse.Namespace, settings: Settings) -> None:
     state = SourceStateStore(engine)
 
     try:
-        async with SourceIngestionPipeline(token=settings.github_token) as pipeline:
+        async with _source_pipeline(settings) as pipeline:
             result = await IncrementalSourceSync(
                 pipeline=pipeline,
                 retrieval=retrieval,
@@ -205,7 +217,7 @@ async def _run(args: argparse.Namespace) -> None:
         return
 
     source = get_source(args.source_id)
-    async with SourceIngestionPipeline(token=settings.github_token) as pipeline:
+    async with _source_pipeline(settings) as pipeline:
         if args.command == "discover":
             manifest = await pipeline.discover(source)
             print(
