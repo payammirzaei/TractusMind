@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import {
@@ -16,7 +17,9 @@ import {
   SESSION_COOKIE_OPTIONS,
   SESSION_MAX_AGE_SECONDS,
 } from "@/lib/server-session";
-import { cookies } from "next/headers";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 const API_URL = (process.env.TRACTUSMIND_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
 
