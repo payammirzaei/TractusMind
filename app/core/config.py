@@ -15,6 +15,14 @@ _SECRET_FILE_FIELDS = {
     "ops_admin_key": "ops_admin_key_file",
     "metrics_admin_key": "metrics_admin_key_file",
 }
+_SUPPORTED_OIDC_ALGORITHMS = {
+    "RS256",
+    "RS384",
+    "RS512",
+    "ES256",
+    "ES384",
+    "ES512",
+}
 
 
 class Settings(BaseSettings):
@@ -134,6 +142,17 @@ class Settings(BaseSettings):
             object.__setattr__(self, target, value)
         if self.oidc_enabled and not self.oidc_issuer_url:
             raise ValueError("OIDC_ISSUER_URL is required when OIDC_ENABLED=true")
+        if self.oidc_enabled:
+            algorithms = set(self.oidc_algorithm_list)
+            if not algorithms:
+                raise ValueError("OIDC_ALLOWED_ALGORITHMS must not be empty")
+            unsupported = algorithms - _SUPPORTED_OIDC_ALGORITHMS
+            if unsupported:
+                names = ", ".join(sorted(unsupported))
+                raise ValueError(
+                    "OIDC_ALLOWED_ALGORITHMS supports asymmetric signing only; "
+                    f"unsupported: {names}"
+                )
         return self
 
     @property
