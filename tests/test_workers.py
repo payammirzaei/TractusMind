@@ -2,7 +2,8 @@ import pytest
 
 from app.core.config import Settings
 from app.ingestion.models import SourceDefinition, SourcePriority
-from app.workers import scheduler, sync as worker_sync
+from app.workers import scheduler
+from app.workers import sync as worker_sync
 
 
 class FakeMessage:
