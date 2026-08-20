@@ -168,13 +168,11 @@ class QdrantKnowledgeStore:
                 models.Prefetch(
                     query=list(dense_vector),
                     using=DENSE_VECTOR_NAME,
-                    filter=query_filter,
                     limit=prefetch_limit,
                 ),
                 models.Prefetch(
                     query=sparse_vector,
                     using=SPARSE_VECTOR_NAME,
-                    filter=query_filter,
                     limit=prefetch_limit,
                 ),
             ],
