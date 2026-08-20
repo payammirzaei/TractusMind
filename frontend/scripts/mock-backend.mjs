@@ -1,6 +1,6 @@
 import http from "node:http";
 
-const host = "127.0.0.1";
+const host = process.env.MOCK_BACKEND_HOST ?? "127.0.0.1";
 const port = Number(process.env.MOCK_BACKEND_PORT ?? 8000);
 const validToken = "tm_test_admin";
 
@@ -24,7 +24,7 @@ function authorized(request) {
 }
 
 const server = http.createServer((request, response) => {
-  const url = new URL(request.url ?? "/", `http://${host}:${port}`);
+  const url = new URL(request.url ?? "/", `http://localhost:${port}`);
 
   if (request.method === "GET" && url.pathname === "/health/ready") {
     return json(response, 200, { status: "ok", checks: { postgres: "ok", redis: "ok", qdrant: "ok" } });
@@ -90,7 +90,7 @@ const server = http.createServer((request, response) => {
 });
 
 server.listen(port, host, () => {
-  process.stdout.write(`mock backend listening on http://${host}:${port}\n`);
+  process.stdout.write(`mock backend listening on ${host}:${port}\n`);
 });
 
 function shutdown() {
