@@ -2,34 +2,44 @@
 
 TractusMind is designed as a source-grounded engineering copilot rather than a generic chatbot.
 The production-shaped deployment separates request serving, scheduled ingestion, ingestion work,
-retrieval storage, application state, and job orchestration.
+retrieval storage, application state, job orchestration, metrics, and traces.
 
 ```text
 Public Internet
       |
       v
- FastAPI API
+ FastAPI API --------------------> OTLP Collector (optional)
+      |                                  |
+      |                                  v
+      |                             Trace backend
       |
       +---------------------- private network ----------------------+
       |                    |             |             |            |
       v                    v             v             v            v
  Scheduler -> Redis -> Ingestion Worker  Qdrant     PostgreSQL    Redis
-                         |                  |
-                         |             Dense + Sparse
-                         |               Retrieval
-                         v
-                  Incremental Sync
+    |                    |                  |
+    |                    |             Dense + Sparse
+    |                    |               Retrieval
+    |                    v
+    |             Incremental Sync
+    |                    |
+    +--------- metrics --+---------> Prometheus
+              API metrics ---------> Prometheus
+              Dramatiq metrics ----> Prometheus
 ```
 
 ## Responsibilities
 
-- **FastAPI**: query API, health endpoints, orchestration, and later authentication.
+- **FastAPI**: grounded query API, health endpoints, protected operations API, request correlation,
+  Prometheus API metrics, and optional OpenTelemetry tracing.
 - **Scheduler**: periodically enqueue all enabled source IDs; it never performs ingestion work.
-- **Worker**: source locks, crawling, parsing, code-aware chunking, embeddings, and incremental
-  indexing.
+- **Worker**: source locks, crawling, parsing, code-aware chunking, embeddings, incremental indexing,
+  and worker/model metrics.
 - **Qdrant**: dense/sparse vectors, exact debug payload indexes, snapshot metadata, and chunks.
 - **PostgreSQL**: source/file state, ingestion runs, evaluations, conversations, and feedback.
 - **Redis**: Dramatiq queue, distributed per-source ingestion locks, and short-lived cache.
+- **Prometheus**: API, RAG-stage, local-model, ingestion, scheduler, and native Dramatiq metrics.
+- **OpenTelemetry**: optional API/request and RAG-stage traces exported over OTLP/HTTP.
 - **S3-compatible storage**: immutable/raw source snapshots and ingestion artifacts.
 
 ## Background ingestion path
@@ -84,6 +94,36 @@ used as a hard payload filter because a release repository can document several 
 same indexed ref. Explicit `ref:` and `commit:` constraints are hard filters and fail closed when
 that indexed provenance is unavailable.
 
+## Observability contract
+
+Prometheus metrics and OpenTelemetry traces observe the same production paths rather than a second
+instrumentation-only implementation.
+
+API metrics use FastAPI route templates instead of raw paths. Pipeline metrics use bounded labels
+such as stage and query intent. Ingestion metrics may use source IDs because source IDs come from
+the finite allowlisted registry. Arbitrary question text, source code, error bodies, paths, commit
+SHAs, chunk IDs, request IDs, trace IDs, credentials, and authorization headers are never metric
+labels.
+
+The local Compose topology scrapes:
+
+```text
+api:8000/metrics       -> HTTP + RAG pipeline metrics
+worker:9101/metrics    -> TractusMind worker/ingestion/model metrics
+worker:9191/           -> native Dramatiq queue/runtime metrics
+scheduler:9102/metrics -> scheduler enqueue metrics
+```
+
+OpenTelemetry export is optional. When `OTEL_TRACES_ENDPOINT` is configured, FastAPI creates the
+request/server span and TractusMind adds child spans for retrieval, generation, and verification.
+Without an endpoint there is no OTLP exporter dependency at runtime.
+
+Each normal API response receives an `X-Request-ID`. The request ID is also bound to structured
+logs; when an OpenTelemetry span is active its trace ID is bound as well. These correlation IDs are
+kept out of metric labels.
+
+See [`observability.md`](observability.md) for metric families, security rules, and example PromQL.
+
 ## Provenance contract
 
 Incremental ingestion distinguishes the repository snapshot from the exact content commit:
@@ -119,7 +159,8 @@ The retrieval pipeline evolves deliberately:
 5. Version- and metadata-aware routing/filtering
 6. Debugging-specific exact-search lane
 7. Incremental source state + scheduled background synchronization
-8. Code-aware and graph-enhanced retrieval only when benchmark results justify it
+8. Production observability and measured quality calibration
+9. Code-aware and graph-enhanced retrieval only when benchmark results justify it
 
 Every answer should remain traceable to repository/file/version/snapshot/content commit/chunk and
 retrieval evidence.
