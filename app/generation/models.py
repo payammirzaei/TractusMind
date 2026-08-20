@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 class AnswerCitation(BaseModel):
     citation_id: str
     chunk_id: str
+    source_id: str
     repository: str
     component: str
     commit_sha: str
