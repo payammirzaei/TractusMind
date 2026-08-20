@@ -1,0 +1,143 @@
+# Official Tractus-X knowledge sources for TractusMind.
+#
+# The registry is intentionally allowlist-based. We do not crawl the whole
+# Eclipse Tractus-X organization because archived, generated, historical, or
+# very large repositories can reduce retrieval quality.
+
+[[sources]]
+id = "tractusx-sdk"
+provider = "github"
+owner = "eclipse-tractusx"
+repo = "tractusx-sdk"
+component = "sdk"
+priority = "critical"
+ref = "main"
+enabled = true
+allow_archived = false
+max_file_bytes = 1000000
+include = [
+  "README.md",
+  "docs/**/*.md",
+  "examples/**/*.py",
+  "tractusx_sdk/**/*.py",
+  "**/*.json",
+  "**/*.jsonld",
+  "**/*.yaml",
+  "**/*.yml",
+]
+exclude = [
+  "**/.venv/**",
+  "**/__pycache__/**",
+  "**/node_modules/**",
+  "**/dist/**",
+  "**/build/**",
+  "**/site/**",
+  "**/coverage/**",
+]
+
+[[sources]]
+id = "tractusx-edc"
+provider = "github"
+owner = "eclipse-tractusx"
+repo = "tractusx-edc"
+component = "edc"
+priority = "critical"
+ref = "main"
+enabled = true
+allow_archived = false
+max_file_bytes = 1000000
+include = [
+  "README.md",
+  "docs/**/*.md",
+  "**/*.java",
+  "**/*.json",
+  "**/*.jsonld",
+  "**/*.yaml",
+  "**/*.yml",
+  "**/*.properties",
+]
+exclude = [
+  "**/.gradle/**",
+  "**/build/**",
+  "**/dist/**",
+  "**/node_modules/**",
+  "**/generated/**",
+]
+
+[[sources]]
+id = "digital-twin-registry"
+provider = "github"
+owner = "eclipse-tractusx"
+repo = "sldt-digital-twin-registry"
+component = "digital-twin"
+priority = "high"
+ref = "main"
+enabled = true
+allow_archived = false
+max_file_bytes = 1000000
+include = [
+  "README.md",
+  "docs/**/*.md",
+  "**/*.java",
+  "**/*.json",
+  "**/*.yaml",
+  "**/*.yml",
+]
+exclude = ["**/build/**", "**/generated/**"]
+
+[[sources]]
+id = "semantic-models"
+provider = "github"
+owner = "eclipse-tractusx"
+repo = "sldt-semantic-models"
+component = "semantic-models"
+priority = "high"
+ref = "main"
+enabled = true
+allow_archived = false
+max_file_bytes = 2000000
+include = [
+  "README.md",
+  "**/*.ttl",
+  "**/*.json",
+  "**/*.jsonld",
+  "**/*.md",
+]
+exclude = ["**/dist/**", "**/generated/**"]
+
+[[sources]]
+id = "tractusx-docs"
+provider = "github"
+owner = "eclipse-tractusx"
+repo = "eclipse-tractusx.github.io"
+component = "documentation"
+priority = "high"
+ref = "main"
+enabled = true
+allow_archived = false
+max_file_bytes = 1000000
+include = [
+  "docs-kits/**/*.md",
+  "docs/**/*.md",
+]
+exclude = [
+  "**/node_modules/**",
+  "**/static/**",
+  "**/assets/**",
+  "**/generated/**",
+  "**/versioned_docs/**",
+]
+
+[[sources]]
+id = "tractusx-release"
+provider = "github"
+owner = "eclipse-tractusx"
+repo = "tractus-x-release"
+component = "release"
+priority = "high"
+ref = "main"
+enabled = true
+allow_archived = false
+max_file_bytes = 1000000
+include = ["README.md", "**/*.md", "**/*.yaml", "**/*.yml", "**/*.json"]
+exclude = []
