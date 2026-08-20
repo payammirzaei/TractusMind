@@ -3,11 +3,13 @@ import time
 
 import httpx
 import jwt
+import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.ops_auth import require_ops_admin, require_ops_operator
+from app.api.routes.me import router as me_router
 from app.auth.oidc import OIDCAuthenticator, OIDCAuthenticationError
 from app.auth.store import UserIdentity, UserRole
 from app.core.config import Settings
@@ -60,25 +62,31 @@ def _token(private_key, *, issuer: str, kid: str, roles: list[str]) -> str:
     )
 
 
+def _settings(issuer: str, *, audience: str = "tractusmind-api") -> Settings:
+    return Settings(
+        app_env="production",
+        oidc_enabled=True,
+        oidc_issuer_url=issuer,
+        oidc_audience=audience,
+        oidc_admin_roles="tractusmind-admin",
+        oidc_operator_roles="tractusmind-operator",
+    )
+
+
 async def test_oidc_verifies_jwks_and_maps_admin_role() -> None:
     issuer = "https://id.example.com/realms/tractusmind"
     private_key, jwk = _keypair("key-1")
     store = FakeAuthStore()
-    settings = Settings(
-        app_env="production",
-        oidc_enabled=True,
-        oidc_issuer_url=issuer,
-        oidc_audience="tractusmind-api",
-        oidc_admin_roles="tractusmind-admin",
-        oidc_operator_roles="tractusmind-operator",
-    )
-    authenticator = OIDCAuthenticator(settings, store)  # type: ignore[arg-type]
+    authenticator = OIDCAuthenticator(_settings(issuer), store)  # type: ignore[arg-type]
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/.well-known/openid-configuration"):
             return httpx.Response(
                 200,
-                json={"issuer": issuer, "jwks_uri": f"{issuer}/protocol/openid-connect/certs"},
+                json={
+                    "issuer": issuer,
+                    "jwks_uri": f"{issuer}/protocol/openid-connect/certs",
+                },
             )
         return httpx.Response(200, json={"keys": [jwk]})
 
@@ -107,32 +115,63 @@ async def test_oidc_rejects_wrong_audience() -> None:
     issuer = "https://id.example.com/realms/tractusmind"
     private_key, jwk = _keypair("key-1")
     store = FakeAuthStore()
-    settings = Settings(
-        app_env="production",
-        oidc_enabled=True,
-        oidc_issuer_url=issuer,
-        oidc_audience="different-api",
+    authenticator = OIDCAuthenticator(
+        _settings(issuer, audience="different-api"),
+        store,  # type: ignore[arg-type]
     )
-    authenticator = OIDCAuthenticator(settings, store)  # type: ignore[arg-type]
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/.well-known/openid-configuration"):
-            return httpx.Response(200, json={"issuer": issuer, "jwks_uri": f"{issuer}/jwks"})
+            return httpx.Response(
+                200,
+                json={"issuer": issuer, "jwks_uri": f"{issuer}/jwks"},
+            )
         return httpx.Response(200, json={"keys": [jwk]})
 
     await authenticator._client.aclose()
     authenticator._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     try:
-        try:
+        with pytest.raises(OIDCAuthenticationError):
             await authenticator.authenticate(
                 _token(private_key, issuer=issuer, kid="key-1", roles=[])
             )
-        except OIDCAuthenticationError:
-            pass
-        else:
-            raise AssertionError("wrong audience token must be rejected")
     finally:
         await authenticator.close()
+
+
+async def test_oidc_refreshes_jwks_when_token_uses_rotated_kid() -> None:
+    issuer = "https://id.example.com/realms/tractusmind"
+    _old_private_key, old_jwk = _keypair("old-key")
+    new_private_key, new_jwk = _keypair("new-key")
+    store = FakeAuthStore()
+    authenticator = OIDCAuthenticator(_settings(issuer), store)  # type: ignore[arg-type]
+    jwks_requests = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal jwks_requests
+        if request.url.path.endswith("/.well-known/openid-configuration"):
+            return httpx.Response(
+                200,
+                json={"issuer": issuer, "jwks_uri": f"{issuer}/jwks"},
+            )
+        jwks_requests += 1
+        return httpx.Response(
+            200,
+            json={"keys": [old_jwk] if jwks_requests == 1 else [new_jwk]},
+        )
+
+    await authenticator._client.aclose()
+    authenticator._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        identity = await authenticator.authenticate(
+            _token(new_private_key, issuer=issuer, kid="new-key", roles=[])
+        )
+    finally:
+        await authenticator.close()
+
+    assert identity is not None
+    assert identity.role is UserRole.USER
+    assert jwks_requests == 2
 
 
 class OpsAuthStore:
@@ -154,6 +193,7 @@ def _rbac_app(role: UserRole) -> FastAPI:
     app = FastAPI()
     app.state.auth_store = OpsAuthStore(role)
     app.state.oidc_auth = None
+    app.include_router(me_router)
 
     @app.get("/operator", dependencies=[Depends(require_ops_operator)])
     async def operator_route() -> dict[str, str]:
@@ -180,3 +220,15 @@ def test_admin_inherits_operator_access() -> None:
 
     assert client.get("/operator", headers=headers).status_code == 200
     assert client.post("/admin", headers=headers).status_code == 200
+
+
+def test_me_exposes_identity_role_and_auth_type() -> None:
+    client = TestClient(_rbac_app(UserRole.OPERATOR))
+    response = client.get(
+        "/v1/me",
+        headers={"Authorization": "Bearer tm_operator"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["role"] == "operator"
+    assert response.json()["auth_type"] == "api_key"
