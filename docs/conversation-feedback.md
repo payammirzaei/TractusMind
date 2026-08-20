@@ -75,11 +75,16 @@ LLM context are intentionally separate concerns.
 records exact durations in a request-local `contextvars` collector. The `/v1/ask` route persists
 that collector with the final interaction.
 
+Local model operations also write detail keys such as `model.dense.query`,
+`model.sparse.query`, or reranker operation names when those model services are instrumented.
+
 Typical persisted stage data:
 
 ```json
 {
   "retrieval": 0.184,
+  "model.dense.query": 0.031,
+  "model.sparse.query": 0.018,
   "generation": 0.923,
   "verification": 0.417
 }
@@ -116,6 +121,7 @@ through the existing protected operations API:
 
 ```text
 GET /v1/ops/interactions
+GET /v1/ops/interactions/{interaction_id}
 GET /v1/ops/interactions?status=failed
 GET /v1/ops/interactions?conversation_id=<uuid>
 GET /v1/ops/feedback/summary
