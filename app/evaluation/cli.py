@@ -4,11 +4,12 @@ import json
 from pathlib import Path
 
 from app.core.config import Settings, get_settings
-from app.embeddings.service import DenseEmbeddingService
-from app.embeddings.sparse import SparseEmbeddingService
 from app.evaluation.benchmark import aggregate_metrics, evaluate_case, load_benchmark
 from app.infra.qdrant import create_qdrant_client
-from app.reranking.service import CrossEncoderReranker
+from app.retrieval.factory import (
+    create_hybrid_retrieval_service,
+    create_reranked_retrieval_service,
+)
 from app.retrieval.hybrid import HybridRetrievalService
 from app.retrieval.reranked import RerankedRetrievalService
 
@@ -31,27 +32,8 @@ def _parser() -> argparse.ArgumentParser:
 
 def _services(settings: Settings):
     qdrant = create_qdrant_client(settings)
-    retrieval = HybridRetrievalService(
-        qdrant=qdrant,
-        collection_name=settings.qdrant_collection,
-        dense_embedder=DenseEmbeddingService(
-            settings.embedding_model,
-            batch_size=settings.embedding_batch_size,
-        ),
-        sparse_embedder=SparseEmbeddingService(
-            settings.sparse_embedding_model,
-            batch_size=settings.sparse_embedding_batch_size,
-        ),
-    )
-    reranked = RerankedRetrievalService(
-        retrieval=retrieval,
-        reranker=CrossEncoderReranker(
-            settings.reranker_model,
-            batch_size=settings.reranker_batch_size,
-        ),
-        candidate_k=settings.retrieval_top_k,
-        prefetch_k=max(settings.hybrid_prefetch_k, settings.retrieval_top_k),
-    )
+    retrieval = create_hybrid_retrieval_service(settings, qdrant)
+    reranked = create_reranked_retrieval_service(settings, qdrant)
     return qdrant, retrieval, reranked
 
 
@@ -128,7 +110,11 @@ async def _run(args: argparse.Namespace) -> None:
     settings = get_settings()
     cases = load_benchmark(args.dataset)
     qdrant, retrieval, reranked = _services(settings)
-    modes = ("dense", "hybrid", "rerank") if args.mode == "all" else (args.mode,)
+    modes = (
+        ("dense", "hybrid", "rerank")
+        if args.mode == "all"
+        else (args.mode,)
+    )
     try:
         reports = [
             await _run_mode(
