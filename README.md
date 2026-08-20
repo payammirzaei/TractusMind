@@ -42,6 +42,20 @@ pytest -q
 ruff check .
 ```
 
+## Source discovery
+
+Official Tractus-X sources are allowlisted in `config/sources.toml`. Discovery resolves every repository ref to an immutable commit SHA before any content is ingested.
+
+```bash
+# Discover one source
+python scripts/discover_sources.py --source tractusx-sdk
+
+# Discover all enabled sources
+python scripts/discover_sources.py
+```
+
+`GITHUB_TOKEN` is optional for public repositories, but recommended to avoid low unauthenticated API rate limits.
+
 ## Design principle
 
 No hidden RAG magic. The system should make it possible to inspect:
@@ -62,7 +76,7 @@ See [`docs/architecture.md`](docs/architecture.md) for the current architecture 
 
 ## Current milestone
 
-**V0 — Foundation**
+**V0 — Foundation / Source Discovery**
 
 - [x] FastAPI service shell
 - [x] Qdrant/PostgreSQL/Redis connectivity contract
@@ -71,9 +85,11 @@ See [`docs/architecture.md`](docs/architecture.md) for the current architecture 
 - [x] Docker Compose local environment
 - [x] CI lint + test
 - [x] Evaluation directory
-- [ ] Tractus-X source registry
-- [ ] GitHub/docs ingestion
-- [ ] code-aware chunking
+- [x] Tractus-X source registry
+- [x] Version-pinned GitHub manifest discovery
+- [x] Selective file filtering and archived-source protection
+- [ ] fetch and normalize source content
+- [ ] code-aware/document-aware chunking
 - [ ] first dense retrieval benchmark
 
 ## License
