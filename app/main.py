@@ -18,6 +18,7 @@ from app.auth import AuthStore
 from app.conversations import ConversationStore
 from app.core.config import get_settings
 from app.core.logging import configure_logging
+from app.db import verify_database_revision
 from app.infra.postgres import create_postgres_engine
 from app.infra.qdrant import create_qdrant_client
 from app.infra.redis import create_redis_client
@@ -33,6 +34,7 @@ logger = structlog.get_logger()
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.postgres = create_postgres_engine(settings)
+    await verify_database_revision(app.state.postgres)
     app.state.redis = create_redis_client(settings)
     app.state.qdrant = create_qdrant_client(settings)
     app.state.auth_store = AuthStore(app.state.postgres)
