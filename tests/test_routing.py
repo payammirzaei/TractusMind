@@ -51,7 +51,7 @@ def test_explicit_ref_and_commit_become_exact_filter_constraints() -> None:
     must = dumped["must"]
     assert any(condition.get("key") == "source_id" for condition in must)
     assert any(condition.get("key") == "version_ref" for condition in must)
-    assert any(condition.get("key") == "commit_sha" for condition in must)
+    assert any(condition.get("key") == "snapshot_commit_sha" for condition in must)
 
 
 def test_general_query_has_no_hard_qdrant_filter() -> None:
