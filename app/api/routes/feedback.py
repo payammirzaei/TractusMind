@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from app.api.user_auth import optional_user
 from app.auth.store import UserIdentity
 from app.conversations.store import ConversationAccessError
-from app.observability.metrics import FEEDBACK
+from app.observability.metrics import FEEDBACK, QUALITY_REVIEW_SIGNALS
 
 router = APIRouter(prefix="/v1", tags=["feedback"])
 logger = structlog.get_logger()
@@ -60,6 +60,7 @@ async def submit_feedback(
                 interaction_id=record.interaction_id,
                 trigger="feedback_down",
             )
+            QUALITY_REVIEW_SIGNALS.labels(trigger="feedback_down").inc()
         except Exception as exc:
             logger.exception(
                 "quality_review_capture_failed",
