@@ -6,7 +6,7 @@ from app.chunking.models import KnowledgeChunk
 from app.embeddings.service import DenseEmbeddingService
 from app.embeddings.text import build_embedding_text
 from app.retrieval.models import RetrievalHit
-from app.retrieval.qdrant_store import QdrantKnowledgeStore
+from app.retrieval.qdrant_store import QdrantKnowledgeStore, model_scoped_collection_name
 
 
 class DenseRetrievalService:
@@ -18,7 +18,8 @@ class DenseRetrievalService:
         embedder: DenseEmbeddingService,
     ) -> None:
         self.embedder = embedder
-        self.store = QdrantKnowledgeStore(qdrant, collection_name)
+        scoped_name = model_scoped_collection_name(collection_name, embedder.model_name)
+        self.store = QdrantKnowledgeStore(qdrant, scoped_name)
 
     async def index(
         self,
