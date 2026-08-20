@@ -10,10 +10,12 @@ class SmartChunker:
     def __init__(
         self,
         *,
-        documentation_max_chars: int = 6_000,
-        code_max_chars: int = 8_000,
-        structured_max_chars: int = 6_000,
+        documentation_max_chars: int = 1_800,
+        code_max_chars: int = 2_200,
+        structured_max_chars: int = 1_800,
     ) -> None:
+        # BGE-small has a 512-token input window. Conservative character budgets
+        # reduce silent tokenizer truncation while preserving logical boundaries.
         self.markdown = MarkdownChunker(max_chars=documentation_max_chars)
         self.code = CodeChunker(max_chars=code_max_chars)
         self.structured = StructuredChunker(max_chars=structured_max_chars)
