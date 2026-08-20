@@ -89,7 +89,7 @@ one-time per-process revision guard before their first database operation.
 If the revision is missing or stale, runtime fails with an instruction to run:
 
 ```text
-tractusmind-db upgrade
+tractusmind-db bootstrap
 ```
 
 This avoids a dangerous state where one application replica silently mutates shared schema while
