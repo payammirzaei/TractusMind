@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
-from app.conversations.models import AnswerInteraction
+from app.conversations.models import AnswerFeedback, AnswerInteraction
 from app.quality.models import QualityReview, RegressionCase
 from app.state.models import Base
 
@@ -80,6 +80,19 @@ class QualityStore:
             await session.flush()
             return review.review_id
 
+    def _review_statement(self):
+        return (
+            select(QualityReview, AnswerInteraction, AnswerFeedback)
+            .join(
+                AnswerInteraction,
+                AnswerInteraction.interaction_id == QualityReview.interaction_id,
+            )
+            .outerjoin(
+                AnswerFeedback,
+                AnswerFeedback.interaction_id == AnswerInteraction.interaction_id,
+            )
+        )
+
     async def list_reviews(
         self,
         *,
@@ -88,39 +101,27 @@ class QualityStore:
         limit: int = 50,
     ) -> list[ReviewRecord]:
         await self.ensure_schema()
-        statement = (
-            select(QualityReview, AnswerInteraction)
-            .join(
-                AnswerInteraction,
-                AnswerInteraction.interaction_id == QualityReview.interaction_id,
-            )
-            .order_by(QualityReview.created_at.desc())
-            .limit(limit)
-        )
+        statement = self._review_statement().order_by(QualityReview.created_at.desc()).limit(limit)
         if status is not None:
             statement = statement.where(QualityReview.status == status)
         if root_cause is not None:
             statement = statement.where(QualityReview.root_cause == root_cause)
         async with self.sessions() as session:
             rows = (await session.execute(statement)).all()
-        return [self._review_record(review, interaction) for review, interaction in rows]
+        return [
+            self._review_record(review, interaction, feedback)
+            for review, interaction, feedback in rows
+        ]
 
     async def get_review(self, review_id: str) -> ReviewRecord | None:
         await self.ensure_schema()
-        statement = (
-            select(QualityReview, AnswerInteraction)
-            .join(
-                AnswerInteraction,
-                AnswerInteraction.interaction_id == QualityReview.interaction_id,
-            )
-            .where(QualityReview.review_id == review_id)
-        )
+        statement = self._review_statement().where(QualityReview.review_id == review_id)
         async with self.sessions() as session:
             row = (await session.execute(statement)).first()
         if row is None:
             return None
-        review, interaction = row
-        return self._review_record(review, interaction)
+        review, interaction, feedback = row
+        return self._review_record(review, interaction, feedback)
 
     async def dismiss_review(
         self,
@@ -213,6 +214,7 @@ class QualityStore:
         self,
         review: QualityReview,
         interaction: AnswerInteraction,
+        feedback: AnswerFeedback | None,
     ) -> ReviewRecord:
         return ReviewRecord(
             review_id=review.review_id,
@@ -226,7 +228,7 @@ class QualityStore:
             interaction_status=interaction.status,
             intent=interaction.intent,
             error_type=interaction.error_type,
-            feedback_rating=None,
+            feedback_rating=feedback.rating if feedback else None,
             created_at=review.created_at,
             reviewed_at=review.reviewed_at,
         )
