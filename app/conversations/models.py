@@ -14,6 +14,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.auth.models import UserAccount
 from app.state.models import Base
 
 
@@ -27,7 +28,7 @@ class Conversation(Base):
     )
     owner_user_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey("app_user.user_id", ondelete="SET NULL"),
+        ForeignKey(UserAccount.user_id, ondelete="SET NULL"),
         index=True,
         nullable=True,
     )
