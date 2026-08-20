@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import hashlib
+from collections.abc import Sequence
 from pathlib import PurePosixPath
 from urllib.parse import quote
 
@@ -107,6 +108,15 @@ class GitHubContentFetcher:
             size_bytes=len(raw_bytes),
         )
 
+    async def fetch_selected(
+        self,
+        manifest: SourceManifest,
+        files: Sequence[SourceFile],
+    ) -> list[RawDocument]:
+        return await asyncio.gather(
+            *(self.fetch_document(manifest, source_file) for source_file in files)
+        )
+
     async def fetch_documents(
         self,
         manifest: SourceManifest,
@@ -114,6 +124,4 @@ class GitHubContentFetcher:
         limit: int | None = None,
     ) -> list[RawDocument]:
         files = manifest.files if limit is None else manifest.files[: max(0, limit)]
-        return await asyncio.gather(
-            *(self.fetch_document(manifest, source_file) for source_file in files)
-        )
+        return await self.fetch_selected(manifest, files)
