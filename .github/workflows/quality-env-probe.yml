@@ -1,0 +1,39 @@
+name: Quality Environment Probe
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/quality-env-probe.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    environment: quality
+    env:
+      DATABASE_URL: ${{ secrets.QUALITY_DATABASE_URL }}
+      QDRANT_URL: ${{ secrets.QUALITY_QDRANT_URL }}
+      QDRANT_API_KEY: ${{ secrets.QUALITY_QDRANT_API_KEY }}
+      GITHUB_TOKEN_VALUE: ${{ secrets.QUALITY_GITHUB_TOKEN }}
+      LLM_BASE_URL: ${{ secrets.QUALITY_LLM_BASE_URL }}
+      LLM_API_KEY: ${{ secrets.QUALITY_LLM_API_KEY }}
+      LLM_MODEL: ${{ vars.QUALITY_LLM_MODEL }}
+    steps:
+      - name: Verify required quality inputs exist without printing secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in DATABASE_URL QDRANT_URL GITHUB_TOKEN_VALUE LLM_BASE_URL LLM_API_KEY LLM_MODEL; do
+            if [ -z "${!name}" ]; then
+              echo "missing: $name"
+              missing=1
+            else
+              echo "configured: $name"
+            fi
+          done
+          # QDRANT_API_KEY is optional for an unauthenticated/private-network Qdrant instance.
+          if [ -n "$QDRANT_API_KEY" ]; then echo "configured: QDRANT_API_KEY"; else echo "optional/unset: QDRANT_API_KEY"; fi
+          exit "$missing"
