@@ -7,7 +7,6 @@ import {
   Activity,
   ArrowRight,
   Database,
-  Gauge,
   GitBranch,
   RefreshCw,
   ServerCog,
@@ -51,6 +50,17 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T;
 }
 
+async function readHealth(): Promise<SystemHealth | null> {
+  try {
+    const response = await fetch("/api/backend/health/ready", { cache: "no-store" });
+    const payload = await response.json();
+    const valid = payload && typeof payload === "object" && (payload.status === "ok" || payload.status === "degraded") && payload.checks;
+    return valid ? payload as SystemHealth : null;
+  } catch {
+    return null;
+  }
+}
+
 function Metric({ label, value, detail, tone = "cyan" }: { label: string; value: string | number; detail: string; tone?: "cyan" | "green" | "amber" | "red" }) {
   const color = { cyan: "text-cyan-200", green: "text-emerald-300", amber: "text-amber-300", red: "text-red-300" }[tone];
   return (
@@ -69,7 +79,7 @@ function DependencyNode({ label, state }: { label: string; state?: HealthCheck }
         <span className={cn("tm-led", state === "error" && "red", state == null && "cyan")}/>
         <span className="text-xs font-semibold text-slate-300">{label}</span>
       </div>
-      <div className={cn("mt-2 font-mono text-[9px] uppercase tracking-[.12em]", state === "ok" ? "text-emerald-300" : state === "error" ? "text-red-300" : "text-cyan-300")}>{state ?? "live"}</div>
+      <div className={cn("mt-2 font-mono text-[9px] uppercase tracking-[.12em]", state === "ok" ? "text-emerald-300" : state === "error" ? "text-red-300" : "text-slate-600")}>{state ?? "unknown"}</div>
     </div>
   );
 }
@@ -85,7 +95,7 @@ export function CommandCenter({ identity }: { identity: Identity }) {
     if (!quiet) setRefreshing(true);
     try {
       const [health, summary, sources, runs, quality, reviews] = await Promise.all([
-        json<SystemHealth>("/health/ready"),
+        readHealth(),
         json<OpsSummary>("/v1/ops/summary"),
         json<SourceStatus[]>("/v1/ops/sources"),
         json<RunStatus[]>("/v1/ops/runs?limit=24"),
@@ -129,7 +139,7 @@ export function CommandCenter({ identity }: { identity: Identity }) {
   const promoted = snapshot.quality?.review_counts.promoted ?? 0;
   const healthOk = snapshot.health?.status === "ok";
   const missionTone = !snapshot.health ? "cyan" : !healthOk || failedSources > 0 ? "red" : pendingReviews > 0 ? "amber" : "green";
-  const missionLabel = !snapshot.health ? "Establishing telemetry" : !healthOk ? "Core degraded" : failedSources > 0 ? "Source attention required" : pendingReviews > 0 ? "Quality review pending" : "Mission nominal";
+  const missionLabel = !snapshot.health ? "Health telemetry unavailable" : !healthOk ? "Core degraded" : failedSources > 0 ? "Source attention required" : pendingReviews > 0 ? "Quality review pending" : "Mission nominal";
 
   const activityMax = Math.max(1, ...snapshot.runs.slice(0, 12).map((run) => Math.max(run.indexed_count, run.chunk_count)));
   const recentRuns = useMemo(() => snapshot.runs.slice(0, 12).reverse(), [snapshot.runs]);
@@ -155,8 +165,8 @@ export function CommandCenter({ identity }: { identity: Identity }) {
       {error && <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="mt-4 rounded-xl border border-red-300/15 bg-red-300/5 p-3 text-xs text-red-200">{error}</motion.div>}
 
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <Metric label="core" value={snapshot.health?.status?.toUpperCase() ?? "—"} detail="Postgres · Redis · Qdrant readiness" tone={healthOk ? "green" : snapshot.health ? "red" : "cyan"}/>
-        <Metric label="source coverage" value={`${indexed}/${enabled}`} detail={`${failedSources} failed · ${runningSources} active`} tone={indexed === enabled && failedSources === 0 ? "green" : failedSources > 0 ? "red" : "amber"}/>
+        <Metric label="core" value={snapshot.health?.status?.toUpperCase() ?? "UNKNOWN"} detail="Postgres · Redis · Qdrant readiness" tone={healthOk ? "green" : snapshot.health ? "red" : "cyan"}/>
+        <Metric label="source coverage" value={`${indexed}/${enabled}`} detail={`${failedSources} failed · ${runningSources} active`} tone={enabled === 0 ? "cyan" : indexed === enabled && failedSources === 0 ? "green" : failedSources > 0 ? "red" : "amber"}/>
         <Metric label="sync activity" value={snapshot.summary?.running_sources ?? runningSources} detail={`${snapshot.runs.length} recent runs loaded`} tone={runningSources > 0 ? "cyan" : "green"}/>
         <Metric label="quality inbox" value={pendingReviews} detail={`${promoted} promoted reviews`} tone={pendingReviews > 0 ? "amber" : "green"}/>
         <Metric label="regression guard" value={regressions} detail="human-reviewed production cases" tone="cyan"/>
