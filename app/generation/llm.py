@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 from uuid import uuid4
@@ -70,8 +71,10 @@ class OpenAICompatibleLLM:
         self.retry_base_seconds = retry_base_seconds
         self.retry_max_seconds = retry_max_seconds
         self._sleep = sleep
+        scope_source = f"{base_url.rstrip('/')}|{model_name}".encode("utf-8")
         self._breaker = shared_provider_circuit(
             provider="llm",
+            scope=hashlib.sha256(scope_source).hexdigest()[:16],
             failure_threshold=circuit_failure_threshold,
             cooldown_seconds=circuit_cooldown_seconds,
         )
@@ -95,9 +98,7 @@ class OpenAICompatibleLLM:
         except CircuitOpenError as exc:
             PROVIDER_CIRCUIT_OPEN.labels(provider="llm", event="rejected").inc()
             PROVIDER_REQUESTS.labels(
-                provider="llm",
-                operation=operation,
-                outcome="circuit_open",
+                provider="llm", operation=operation, outcome="circuit_open"
             ).inc()
             raise LLMGenerationError("LLM provider circuit is open") from exc
 
@@ -156,9 +157,7 @@ class OpenAICompatibleLLM:
             except httpx.HTTPStatusError as exc:
                 await self._breaker.record_success()
                 PROVIDER_REQUESTS.labels(
-                    provider="llm",
-                    operation=operation,
-                    outcome="http_error",
+                    provider="llm", operation=operation, outcome="http_error"
                 ).inc()
                 raise LLMGenerationError(
                     f"LLM request failed with status {response.status_code}"
@@ -170,23 +169,17 @@ class OpenAICompatibleLLM:
                 content = payload["choices"][0]["message"]["content"]
             except (KeyError, IndexError, TypeError, ValueError) as exc:
                 PROVIDER_REQUESTS.labels(
-                    provider="llm",
-                    operation=operation,
-                    outcome="invalid_response",
+                    provider="llm", operation=operation, outcome="invalid_response"
                 ).inc()
                 raise LLMGenerationError("Unexpected LLM response shape") from exc
             if not isinstance(content, str) or not content.strip():
                 PROVIDER_REQUESTS.labels(
-                    provider="llm",
-                    operation=operation,
-                    outcome="invalid_response",
+                    provider="llm", operation=operation, outcome="invalid_response"
                 ).inc()
                 raise LLMGenerationError("LLM returned empty content")
 
             PROVIDER_REQUESTS.labels(
-                provider="llm",
-                operation=operation,
-                outcome="success",
+                provider="llm", operation=operation, outcome="success"
             ).inc()
             return content.strip()
 
@@ -194,9 +187,7 @@ class OpenAICompatibleLLM:
         if opened:
             PROVIDER_CIRCUIT_OPEN.labels(provider="llm", event="opened").inc()
         PROVIDER_REQUESTS.labels(
-            provider="llm",
-            operation=operation,
-            outcome="transient_failure",
+            provider="llm", operation=operation, outcome="transient_failure"
         ).inc()
         if transient_error is None:
             transient_error = RuntimeError(transient_reason)
@@ -213,9 +204,7 @@ class OpenAICompatibleLLM:
         retry_after: float | None,
     ) -> None:
         PROVIDER_RETRIES.labels(
-            provider="llm",
-            operation=operation,
-            reason=reason,
+            provider="llm", operation=operation, reason=reason
         ).inc()
         delay = await sleep_before_retry(
             attempt,
