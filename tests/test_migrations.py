@@ -11,13 +11,15 @@ def test_alembic_head_matches_application_revision() -> None:
     assert script.get_current_head() == CURRENT_DATABASE_REVISION
 
 
-def test_migration_chain_contains_core_and_user_auth_revisions() -> None:
+def test_migration_chain_contains_auth_and_rbac_revisions() -> None:
     script = ScriptDirectory.from_config(Config("alembic.ini"))
     revisions = {revision.revision: revision for revision in script.walk_revisions()}
 
     assert "0001_core_schema" in revisions
     assert "0002_user_auth" in revisions
+    assert "0003_oidc_rbac" in revisions
     assert revisions["0002_user_auth"].down_revision == "0001_core_schema"
+    assert revisions["0003_oidc_rbac"].down_revision == "0002_user_auth"
 
 
 def test_bootstrap_managed_table_contract_includes_full_core_schema() -> None:
