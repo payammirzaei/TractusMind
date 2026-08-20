@@ -51,9 +51,14 @@ def test_metrics_require_key_outside_development(monkeypatch) -> None:
         "/metrics",
         headers={"X-TractusMind-Metrics-Key": "metrics-secret"},
     )
+    bearer = client.get(
+        "/metrics",
+        headers={"Authorization": "Bearer metrics-secret"},
+    )
 
     assert denied.status_code == 401
     assert allowed.status_code == 200
+    assert bearer.status_code == 200
 
 
 def test_http_middleware_adds_request_id_header() -> None:
