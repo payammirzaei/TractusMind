@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from app.api.routes.ask import router as ask_router
 from app.api.routes.feedback import router as feedback_router
 from app.api.routes.health import router as health_router
+from app.api.routes.interaction_ops import router as interaction_ops_router
 from app.api.routes.metrics import router as metrics_router
 from app.api.routes.ops import router as ops_router
 from app.conversations import ConversationStore
@@ -55,6 +56,7 @@ app.include_router(health_router)
 app.include_router(ask_router)
 app.include_router(feedback_router)
 app.include_router(ops_router)
+app.include_router(interaction_ops_router)
 app.include_router(metrics_router)
 app.middleware("http")(observe_http_request)
 app.state.tracer_provider = configure_tracing(app, settings)
