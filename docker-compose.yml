@@ -1,7 +1,7 @@
 services:
   migrate:
     build: .
-    command: tractusmind-db upgrade
+    command: tractusmind-db bootstrap
     env_file: .env
     depends_on:
       postgres:
