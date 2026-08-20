@@ -54,6 +54,7 @@ jobs:
       - name: Smoke production runtime, BFF and OIDC boundary
         env:
           TRACTUSMIND_API_URL: http://127.0.0.1:8000
+          TRACTUSMIND_OIDC_ENABLED: "true"
           TRACTUSMIND_OIDC_ISSUER_URL: http://127.0.0.1:8001
           TRACTUSMIND_OIDC_CLIENT_ID: tractusmind-ci
           TRACTUSMIND_OIDC_SCOPES: openid profile email
