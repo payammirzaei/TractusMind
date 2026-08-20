@@ -22,6 +22,9 @@ services:
     volumes:
       - ./app:/app/app
       - ./config:/app/config:ro
+    expose:
+      - "9101"
+      - "9191"
     depends_on:
       redis:
         condition: service_healthy
@@ -37,9 +40,26 @@ services:
     volumes:
       - ./app:/app/app
       - ./config:/app/config:ro
+    expose:
+      - "9102"
     depends_on:
       redis:
         condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v3.13.2
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - api
+      - worker
+      - scheduler
 
   postgres:
     image: postgres:17-alpine
@@ -77,3 +97,4 @@ volumes:
   postgres_data:
   redis_data:
   qdrant_data:
+  prometheus_data:
