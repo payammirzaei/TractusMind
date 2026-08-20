@@ -1,80 +1,113 @@
-# Ingestion operations
+# Operations API
 
-TractusMind exposes a small protected operations API for inspecting and triggering source
-synchronization. The operations surface is intended for an internal admin UI or operator tooling,
-not anonymous public access.
+TractusMind exposes protected operations endpoints for source state, ingestion runs, answer traces,
+quality review, and administrative actions. The surface is intended for Mission Control/operator
+tooling, not anonymous access.
 
 ## Authentication
 
-Set a strong secret:
-
-```bash
-OPS_ADMIN_KEY=replace-with-a-long-random-secret
-```
-
-Send it on every operations request:
+Normal operations access uses the same bearer identity layer as the rest of TractusMind:
 
 ```http
-X-TractusMind-Admin-Key: replace-with-a-long-random-secret
+Authorization: Bearer tm_...
 ```
 
-If `OPS_ADMIN_KEY` is unset, `/v1/ops/*` returns `503` instead of silently becoming public. An
-invalid or missing header returns `401` when the operations API is configured.
+or a verified enterprise OIDC access token:
 
-## Read endpoints
+```http
+Authorization: Bearer <OIDC JWT>
+```
+
+Roles are hierarchical:
+
+```text
+user < operator < admin
+```
+
+A valid `user` without sufficient operations privileges receives `403`. Missing/invalid bearer
+authentication receives `401`.
+
+## Break-glass admin
+
+`OPS_ADMIN_KEY` remains supported for emergency/bootstrap access:
+
+```http
+X-TractusMind-Admin-Key: <secret>
+```
+
+A matching key is treated as `admin`. Do not distribute this shared credential to normal human
+operators once API-key roles or OIDC are configured.
+
+## Operator read endpoints
+
+`operator` and `admin` can inspect:
 
 ```text
 GET /v1/ops/summary
 GET /v1/ops/sources
 GET /v1/ops/sources/{source_id}
-GET /v1/ops/runs?source_id=tractusx-sdk&status=failed&limit=50
+GET /v1/ops/runs
 GET /v1/ops/runs/{run_id}
+GET /v1/ops/interactions
+GET /v1/ops/interactions/{interaction_id}
+GET /v1/ops/feedback/summary
+GET /v1/ops/quality/summary
+GET /v1/ops/quality/reviews
+GET /v1/ops/quality/reviews/{review_id}
+GET /v1/ops/quality/regressions
+GET /v1/ops/quality/regressions/export
 ```
+
+Read-only operator access is intentionally sufficient for dashboards, investigation, and quality
+triage without granting mutation permissions.
+
+## Admin mutations
+
+Only `admin` can mutate operational state:
+
+```text
+POST  /v1/ops/sources/{source_id}/sync
+POST  /v1/ops/sync
+POST  /v1/ops/quality/reviews/{review_id}/decision
+GET   /v1/ops/users
+POST  /v1/ops/users
+POST  /v1/ops/users/{user_id}/rotate
+PATCH /v1/ops/users/{user_id}
+```
+
+User lifecycle endpoints are admin-only even when they are reads, because they expose credential
+metadata and identity-management state.
+
+OIDC user roles are controlled by identity-provider claims. TractusMind administrators may locally
+disable or re-enable an OIDC identity, but attempts to override its role return `409`. API-key
+identity roles remain locally manageable.
+
+## Source operations
 
 Source status merges the static source registry with PostgreSQL ingestion state and Redis lock
-state. It exposes the configured ref, current successful snapshot commit, indexed file count,
-last successful run, and the latest run even if that latest run is failed or still running.
+state. It exposes configured ref, successful snapshot commit, indexed file count, last successful
+run, and the latest run even if it failed or is still running.
 
-Run records expose the delta counters from incremental ingestion:
+Trigger endpoints enqueue Dramatiq messages and return `202 Accepted`; they do not execute
+synchronization inline. Workers continue through the Redis-locked incremental ingestion path.
 
-```text
-discovered
-added
-modified
-deleted
-unchanged
-fetched
-chunked
-indexed
-```
+Disabled registry sources cannot be manually triggered and return `409 Conflict`.
 
-Failed runs include the persisted error message. Because these details may contain internal
-runtime information, the read endpoints use the same admin-key protection as mutation endpoints.
+## Current identity
 
-## Trigger endpoints
+Authenticated clients can resolve the identity/role used for UI authorization with:
 
 ```text
-POST /v1/ops/sources/{source_id}/sync
-POST /v1/ops/sync
+GET /v1/me
 ```
 
-The API does not run ingestion inside the HTTP request. It enqueues Dramatiq messages and returns
-`202 Accepted` with the broker message ID. Workers then execute the existing Redis-locked,
-incremental source-sync path.
+The response contains only:
 
-Disabled registry sources cannot be triggered individually and return `409 Conflict`.
+```text
+user_id
+display_name
+role
+auth_type
+```
 
-## Summary semantics
-
-`GET /v1/ops/summary` returns:
-
-- configured and enabled source counts
-- indexed source count
-- currently locked source count
-- sources whose latest run is running or failed
-- scheduler interval
-- Redis connectivity status
-- aggregate ingestion-run status counts from PostgreSQL
-
-This endpoint is intentionally built from the same source state used by ingestion itself rather
-than maintaining a second monitoring database.
+It does not expose API-key hashes, OIDC subjects/issuers, or bearer token contents.
