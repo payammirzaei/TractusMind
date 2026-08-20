@@ -10,6 +10,7 @@
     "smoke": "node scripts/smoke-routes.mjs",
     "smoke:bff": "node scripts/smoke-bff.mjs",
     "smoke:oidc": "node scripts/smoke-oidc.mjs",
+    "smoke:oidc-disabled": "node scripts/smoke-oidc-disabled.mjs",
     "mock:backend": "node scripts/mock-backend.mjs",
     "mock:oidc": "node scripts/mock-oidc.mjs"
   },
