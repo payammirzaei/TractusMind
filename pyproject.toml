@@ -24,6 +24,7 @@ dependencies = [
   "structlog>=24.4,<27.0",
   "tree-sitter>=0.26,<0.27",
   "tree-sitter-language-pack>=1.14.1,<2.0",
+  "sentence-transformers>=3.2,<6.0",
 ]
 
 [project.scripts]
