@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.api.routes.ask import router as ask_router
 from app.api.routes.conversations import router as conversations_router
-from app.auth.store import UserIdentity
+from app.auth.store import UserIdentity, UserRole
 from app.conversations.history import ConversationTurn
 from app.conversations.store import (
     ConversationAccessError,
@@ -29,6 +29,8 @@ class FakeAuthStore:
             display_name="Test User",
             api_key_prefix="tm_valid",
             enabled=True,
+            role=UserRole.USER,
+            auth_type="api_key",
         )
 
 
@@ -102,6 +104,7 @@ def _app() -> tuple[FastAPI, FakeAnswerService, FakeConversationStore]:
     service = FakeAnswerService()
     store = FakeConversationStore()
     app.state.auth_store = FakeAuthStore()
+    app.state.oidc_auth = None
     app.state.answer_service = service
     app.state.conversation_store = store
     app.state.quality_store = FakeQualityStore()
