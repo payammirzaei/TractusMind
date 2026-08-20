@@ -41,6 +41,8 @@ class ReviewResponse(BaseModel):
     intent: str | None
     error_type: str | None
     feedback_rating: str | None
+    feedback_reason: str | None
+    feedback_comment: str | None
     created_at: datetime
     reviewed_at: datetime | None
 
