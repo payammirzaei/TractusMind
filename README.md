@@ -14,10 +14,10 @@ The project intentionally starts with retrieval quality and evaluation before UI
 - FastEmbed + `BAAI/bge-small-en-v1.5` for dense embeddings
 - FastEmbed + `Qdrant/bm25` for sparse lexical retrieval
 - RRF fusion inside Qdrant for hybrid retrieval
+- FastEmbed cross-encoder reranking with `Xenova/ms-marco-MiniLM-L-6-v2`
 - PostgreSQL for application and ingestion state
 - Redis + Dramatiq for background ingestion jobs
 - Tree-sitter for AST-aware source-code chunking
-- Cross-encoder reranking (next retrieval milestone)
 - Docker / Docker Compose
 - GitHub Actions
 - Railway-ready environment configuration
@@ -50,26 +50,23 @@ ruff check .
 Official Tractus-X sources are allowlisted in `config/sources.toml`. Discovery resolves every repository ref to an immutable commit SHA before any content is fetched.
 
 ```bash
-# Inspect the pinned manifest for a source
 tractusmind-ingest discover tractusx-sdk
-
-# Fetch three selected files from that exact commit
 tractusmind-ingest fetch tractusx-sdk --limit 3
-
-# Fetch and smart-chunk three files
 tractusmind-ingest chunk tractusx-sdk --limit 3
-
-# Smoke-index a subset without cleaning previous source versions
 tractusmind-ingest index tractusx-sdk --limit 10
-
-# Full source hybrid index; stale commits are cleaned after successful upsert
 tractusmind-ingest index tractusx-sdk
+```
 
-# Default: hybrid Dense + BM25 + RRF
+Search modes:
+
+```bash
+# Production-oriented default: hybrid candidates + cross-encoder reranking
 tractusmind-ingest search "How do I create an asset with the Tractus-X SDK?" --limit 5
 
-# Dense-only baseline against the same hybrid collection
+# Explicit comparison modes
 tractusmind-ingest search "How do I create an asset with the Tractus-X SDK?" --mode dense --limit 5
+tractusmind-ingest search "How do I create an asset with the Tractus-X SDK?" --mode hybrid --limit 5
+tractusmind-ingest search "How do I create an asset with the Tractus-X SDK?" --mode rerank --limit 5
 ```
 
 Fetched files become canonical `RawDocument` objects containing a stable document ID, repository, commit SHA, blob SHA, language/content type, SHA-256 content hash, normalized UTF-8 text, and a source URL pinned to the exact commit.
@@ -82,21 +79,24 @@ Smart chunking keeps retrieval units source-traceable:
 - YAML is chunked by top-level configuration keys.
 - Turtle/SAMM content is chunked by semantic statements while retaining prefix context.
 - Every chunk carries exact source line ranges and a commit-pinned citation URL.
-- Chunk budgets are conservative for the dense model input window to reduce silent truncation.
+- Chunk budgets are conservative for the dense/reranker input windows to reduce silent truncation.
 
 Hybrid indexing enriches retrieval text with repository, component, path, language, section, and code-symbol context while preserving the original source text unchanged in Qdrant payloads. Every point stores both a named dense vector and a BM25 sparse vector. The sparse vector is configured with Qdrant's IDF modifier.
 
+The reranking stage takes a limited hybrid candidate set, scores each query/chunk pair with a cross-encoder, and returns only the strongest evidence. Both the original retrieval score and the reranker score are retained for later debugging and observability.
+
 ## Retrieval benchmark
 
-The fixed retrieval seed is stored in `benchmarks/dense_v0.jsonl`. The runner evaluates Dense and Hybrid against the exact same indexed collection.
+The fixed retrieval seed is stored in `benchmarks/dense_v0.jsonl`. The runner evaluates all retrieval stages against the exact same indexed collection.
 
 ```bash
-# Compare both modes at K=5
-tractusmind-benchmark --mode both --k 5
+# Dense vs Hybrid vs Hybrid + Reranker
+tractusmind-benchmark --mode all --k 5
 
-# Run only one mode
+# Individual modes
 tractusmind-benchmark --mode dense --k 5
 tractusmind-benchmark --mode hybrid --k 5
+tractusmind-benchmark --mode rerank --k 5
 ```
 
 Current metrics:
@@ -106,7 +106,7 @@ Current metrics:
 - NDCG@K
 - per-question first relevant rank and source trace
 
-A benchmark hit is intentionally strict: the returned chunk must come from an expected source and contain all expected terms for that case. Relevance thresholds remain unset until calibrated from measured Tractus-X retrieval results rather than guessed from cosine scores.
+A benchmark hit is intentionally strict: the returned chunk must come from an expected source and contain all expected terms for that case. Relevance thresholds remain unset until calibrated from measured Tractus-X retrieval results rather than guessed from raw scores.
 
 `GITHUB_TOKEN` is optional for public repositories, but recommended to avoid low unauthenticated API rate limits.
 
@@ -122,8 +122,9 @@ question
   -> dense candidates
   -> sparse candidates
   -> RRF fusion
-  -> reranked chunks
-  -> final context
+  -> hybrid candidate score
+  -> cross-encoder rerank score
+  -> final evidence
   -> generated answer
   -> sources + versions
   -> evaluation result
@@ -133,7 +134,7 @@ See [`docs/architecture.md`](docs/architecture.md) for the current architecture 
 
 ## Current milestone
 
-**V1 — Hybrid Retrieval Baseline**
+**V2 — Reranked Hybrid Retrieval**
 
 - [x] FastAPI service shell
 - [x] Qdrant/PostgreSQL/Redis connectivity contract
@@ -155,10 +156,10 @@ See [`docs/architecture.md`](docs/architecture.md) for the current architecture 
 - [x] Model-scoped hybrid Qdrant collection
 - [x] Dense + sparse RRF fusion
 - [x] Safe stale-commit cleanup after full source reindex
-- [x] Dense/hybrid search CLI with scores and exact citations
+- [x] Dense/hybrid/reranked search CLI
+- [x] Cross-encoder reranking with preserved first-stage scores
 - [x] Fixed retrieval benchmark seed
-- [x] Recall@K / MRR / NDCG benchmark runner
-- [ ] cross-encoder reranking
+- [x] Dense vs Hybrid vs Reranked benchmark runner
 - [ ] calibrated relevance / abstention thresholds
 - [ ] answer generation with grounded citations
 
