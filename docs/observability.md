@@ -1,25 +1,40 @@
 # Observability
 
 TractusMind exposes low-cardinality Prometheus metrics and optional OpenTelemetry traces for the
-API, RAG pipeline, local models, external providers, ingestion worker, and source scheduler.
+API, RAG pipeline, local models, external providers, ingestion worker, source scheduler, and the
+human-reviewed quality loop.
 
 ## Local topology
 
-`docker compose up --build` starts a pinned Prometheus service at `http://localhost:9090` and
-scrapes four targets:
+`docker compose up --build` starts the observability stack:
 
-| Target | Endpoint | Purpose |
+```text
+API / worker / scheduler / Dramatiq metrics
+                  |
+                  v
+             Prometheus
+             /        \
+            v          v
+       Grafana     Alertmanager
+```
+
+Local endpoints:
+
+| Service | Endpoint | Purpose |
 | --- | --- | --- |
-| API | `api:8000/metrics` | HTTP + answer pipeline + API process/model/provider metrics |
-| Worker domain | `worker:9101/metrics` | TractusMind ingestion + worker/model/provider metrics |
-| Dramatiq | `worker:9191/` | Native queue, retry, error, in-progress, and job-duration metrics |
-| Scheduler | `scheduler:9102/metrics` | Scheduled enqueue metrics |
+| Grafana | `http://localhost:3000` | provisioned dashboards |
+| Prometheus | `http://localhost:9090` | metrics, rules, alert state |
+| Alertmanager | `http://localhost:9093` | alert grouping/routing/silences |
+| API metrics | `api:8000/metrics` | HTTP + RAG + API provider/quality metrics |
+| Worker domain | `worker:9101/metrics` | ingestion + worker/model/provider metrics |
+| Dramatiq | `worker:9191/` | native queue/runtime metrics |
+| Scheduler | `scheduler:9102/metrics` | scheduled enqueue metrics |
 
-The local scrape configuration is `config/prometheus.yml`.
+Prometheus configuration is `config/prometheus.yml`; rules are under `config/alerts/`. Grafana
+provisioning and dashboards live under `config/grafana/`.
 
-Dramatiq uses Prometheus multiprocess mode. The worker startup command creates and clears the
-multiprocess directory before importing the worker so native Dramatiq metrics remain valid even
-though TractusMind also imports `prometheus_client`.
+See [`grafana-alerting.md`](grafana-alerting.md) for dashboard contents, rule policy, notification
+routing, and production scrape authentication.
 
 ## API metrics security
 
@@ -31,8 +46,10 @@ In any other environment, configure `METRICS_ADMIN_KEY` or reuse `OPS_ADMIN_KEY`
 X-TractusMind-Metrics-Key: <secret>
 ```
 
-Set `METRICS_ENABLED=false` to disable the API endpoint entirely. Worker and scheduler metrics
-ports should remain private-network-only in production.
+Production Prometheus should inject this header from a mounted secret file. Never commit the key to
+`prometheus.yml`. Worker and scheduler metrics ports should remain private-network-only.
+
+Set `METRICS_ENABLED=false` to disable the API endpoint entirely.
 
 ## TractusMind metrics
 
@@ -43,6 +60,10 @@ Important families include:
 - `tractusmind_pipeline_stage_duration_seconds`
 - `tractusmind_pipeline_stage_errors_total`
 - `tractusmind_answers_total`
+- `tractusmind_answer_feedback_total`
+- `tractusmind_quality_review_signals_total`
+- `tractusmind_quality_review_decisions_total`
+- `tractusmind_quality_regression_promotions_total`
 - `tractusmind_retrieval_results`
 - `tractusmind_model_load_duration_seconds`
 - `tractusmind_model_loaded`
@@ -59,18 +80,22 @@ Important families include:
 - `tractusmind_worker_jobs_total`
 - `tractusmind_queue_enqueued_total`
 
-Provider metrics use only bounded labels such as `provider`, `operation`, `outcome`, `reason`, and
-`event`. They expose retry pressure and circuit behavior without recording prompts, URLs, response
+Provider metrics use bounded labels such as `provider`, `operation`, `outcome`, `reason`, and
+`event`. Quality metrics use bounded `trigger`, `action`, `root_cause`, and `benchmark_kind` enums.
+They expose workflow pressure without recording prompts, questions, reviewer notes, URLs, response
 bodies, repository paths, or provider error text.
 
-Dramatiq additionally exports its native `dramatiq_*` metrics, including processed messages,
-errors, retries, in-progress messages, and message duration.
+Quality counters are event metrics, not current PostgreSQL backlog gauges. Exact pending/promoted
+review counts remain available through the protected quality summary API.
+
+Dramatiq additionally exports its native `dramatiq_*` metrics. `tractusmind_queue_enqueued_total`
+is an enqueue counter and must not be presented as queue depth.
 
 ## Cardinality policy
 
 Metric labels are deliberately bounded. Allowed labels include route templates, pipeline stages,
-query intent, fixed model/provider roles, source IDs from the allowlisted registry, status, and
-change type.
+query intent, fixed model/provider roles, source IDs from the allowlisted registry, quality enums,
+status, and change type.
 
 Never put these values in metric labels:
 
@@ -80,6 +105,8 @@ Never put these values in metric labels:
 - error messages or stack traces
 - commit SHAs or chunk IDs
 - request IDs or trace IDs
+- interaction/review IDs
+- reviewer comments
 - API keys, authorization headers, or other secrets
 
 Request IDs and trace IDs belong in logs/traces, not metric labels.
@@ -161,6 +188,22 @@ Provider circuit rejections:
 ```promql
 sum by (provider) (
   rate(tractusmind_provider_circuit_open_total{event="rejected"}[5m])
+)
+```
+
+Quality review signals:
+
+```promql
+sum by (trigger) (
+  increase(tractusmind_quality_review_signals_total[1h])
+)
+```
+
+Human review decisions:
+
+```promql
+sum by (action, root_cause) (
+  increase(tractusmind_quality_review_decisions_total[6h])
 )
 ```
 
