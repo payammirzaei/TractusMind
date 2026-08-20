@@ -49,14 +49,11 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Validate only the external quality inputs
+      - name: Validate built-in source access input
         shell: bash
         run: |
           set -euo pipefail
           test -n "$GITHUB_TOKEN" || { echo "GitHub Actions token is unavailable"; exit 2; }
-          test -n "$LLM_BASE_URL" || { echo "QUALITY_LLM_BASE_URL is required"; exit 2; }
-          test -n "$LLM_API_KEY" || { echo "QUALITY_LLM_API_KEY is required"; exit 2; }
-          test -n "$LLM_MODEL" || { echo "QUALITY_LLM_MODEL variable is required"; exit 2; }
 
       - name: Verify public Tractus-X source access with the job token
         shell: bash
@@ -138,7 +135,7 @@ jobs:
             --max-unsafe-rate 0 \
             > artifacts/full-corpus/calibration.json
 
-      - name: Load measured threshold
+      - name: Load measured threshold and write pin candidate
         shell: bash
         run: |
           python - <<'PY'
@@ -146,11 +143,26 @@ jobs:
           import os
           from pathlib import Path
 
-          report = json.loads(Path("artifacts/full-corpus/calibration.json").read_text())
+          root = Path("artifacts/full-corpus")
+          report = json.loads((root / "calibration.json").read_text())
           threshold = float(report["recommended_threshold"])
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
               handle.write(f"MINIMUM_RELEVANCE_SCORE={threshold:.6f}\n")
+          (root / "pin-candidate.toml").write_text(
+              "# Human-review this measured value before committing it.\n"
+              "[calibration]\n"
+              f"minimum_relevance_score = {threshold:.6f}\n",
+              encoding="utf-8",
+          )
           PY
+
+      - name: Validate external answer-provider inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$LLM_BASE_URL" || { echo "QUALITY_LLM_BASE_URL is required for answer certification"; exit 2; }
+          test -n "$LLM_API_KEY" || { echo "QUALITY_LLM_API_KEY is required for answer certification"; exit 2; }
+          test -n "$LLM_MODEL" || { echo "QUALITY_LLM_MODEL variable is required for answer certification"; exit 2; }
 
       - name: Run candidate answer evaluation at measured threshold
         run: |
@@ -201,7 +213,7 @@ jobs:
           tractusmind-quality-gate "${args[@]}" \
             | tee artifacts/full-corpus/candidate-gate.json
 
-      - name: Build reproducible validation summary and pin candidate
+      - name: Build reproducible validation summary
         shell: bash
         run: |
           python - <<'PY'
@@ -252,12 +264,6 @@ jobs:
           }
           (root / "validation-summary.json").write_text(
               json.dumps(summary, indent=2) + "\n",
-              encoding="utf-8",
-          )
-          (root / "pin-candidate.toml").write_text(
-              "# Human-review this measured value before committing it.\n"
-              "[calibration]\n"
-              f"minimum_relevance_score = {float(calibration['recommended_threshold']):.6f}\n",
               encoding="utf-8",
           )
           PY
