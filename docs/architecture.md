@@ -22,7 +22,8 @@ Public Internet
     |                    |               Retrieval     +-- ingestion runs
     |                    v                             +-- answer interactions
     |             Incremental Sync                    +-- feedback
-    |                    |
+    |                                                +-- quality reviews
+    |                                                +-- regression cases
     +--------- metrics --+---------> Prometheus
               API metrics ---------> Prometheus
               Dramatiq metrics ----> Prometheus
@@ -37,7 +38,7 @@ Public Internet
   and worker/model metrics.
 - **Qdrant**: dense/sparse vectors, exact debug payload indexes, snapshot metadata, and chunks.
 - **PostgreSQL**: source/file state, ingestion runs, evaluations, conversations, answer traces,
-  citations/verification snapshots, and feedback.
+  citations/verification snapshots, feedback, quality reviews, and reviewed regression cases.
 - **Redis**: Dramatiq queue, distributed per-source ingestion locks, and short-lived cache.
 - **Prometheus**: API, RAG-stage, local-model, ingestion, scheduler, and native Dramatiq metrics.
 - **OpenTelemetry**: optional API/request and RAG-stage traces exported over OTLP/HTTP.
@@ -118,6 +119,40 @@ authentication and ownership checks exist; protected ops endpoints can inspect i
 
 See [`conversation-feedback.md`](conversation-feedback.md).
 
+## Feedback-driven quality loop
+
+Production failures and negative feedback feed a human-reviewed quality path:
+
+```text
+failed interaction ---------+
+                            +-> quality_review (pending)
+down-voted interaction -----+          |
+                                       v
+                             human root-cause review
+                              /                 \
+                         dismiss              promote
+                                                |
+                                                v
+                                      regression_case
+                                                |
+                                                v
+                                      benchmark NDJSON export
+                                                |
+                                                v
+                                       repository code review
+```
+
+Capture is concurrency-safe and idempotent per interaction/trigger. Raw feedback never becomes a
+gold benchmark automatically. Promotion requires an administrator to classify the root cause and
+provide expected evidence or expected abstention. Final review decisions cannot be changed into a
+contradictory state.
+
+Promoted cases retain their production interaction ID and route snapshot. Benchmark export is
+split by benchmark kind so retrieval/debug rows and answer-evaluation rows remain compatible with
+the existing loaders.
+
+See [`quality-loop.md`](quality-loop.md).
+
 ## Observability contract
 
 Prometheus metrics and OpenTelemetry traces observe the same production paths rather than a second
@@ -185,7 +220,9 @@ The retrieval pipeline evolves deliberately:
 7. Incremental source state + scheduled background synchronization
 8. Production observability and measured quality calibration
 9. Persisted conversations, answer traces, and user feedback
-10. Code-aware and graph-enhanced retrieval only when benchmark results justify it
+10. Human-reviewed feedback/failure promotion into regression benchmarks
+11. Code-aware and graph-enhanced retrieval only when benchmark results justify it
 
 Every answer should remain traceable to repository/file/version/snapshot/content commit/chunk,
-retrieval evidence, verification result, persisted interaction, and optional feedback.
+retrieval evidence, verification result, persisted interaction, optional feedback, and any reviewed
+regression case derived from it.
