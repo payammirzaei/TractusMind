@@ -15,7 +15,7 @@ _TRACE_CONTEXT: ContextVar[AnswerTrace | None] = ContextVar(
 )
 
 
-def begin_answer_trace() -> Token[AnswerTrace | None]:
+def begin_answer_trace() -> Token:
     return _TRACE_CONTEXT.set(AnswerTrace())
 
 
@@ -27,7 +27,7 @@ def record_stage_duration(stage: str, duration_seconds: float) -> None:
         )
 
 
-def finish_answer_trace(token: Token[AnswerTrace | None]) -> AnswerTrace:
+def finish_answer_trace(token: Token) -> AnswerTrace:
     current = _TRACE_CONTEXT.get() or AnswerTrace()
     _TRACE_CONTEXT.reset(token)
     return current
