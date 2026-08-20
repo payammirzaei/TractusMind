@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 from collections.abc import Awaitable, Callable
 from time import time
 
@@ -52,8 +53,12 @@ class GitHubApiClient:
         self.retry_base_seconds = retry_base_seconds
         self.retry_max_seconds = retry_max_seconds
         self._sleep = sleep
+        credential_scope = hashlib.sha256(
+            (token or "anonymous").encode("utf-8")
+        ).hexdigest()[:16]
         self._breaker = shared_provider_circuit(
             provider="github",
+            scope=credential_scope,
             failure_threshold=circuit_failure_threshold,
             cooldown_seconds=circuit_cooldown_seconds,
         )
@@ -84,9 +89,7 @@ class GitHubApiClient:
         except CircuitOpenError as exc:
             PROVIDER_CIRCUIT_OPEN.labels(provider="github", event="rejected").inc()
             PROVIDER_REQUESTS.labels(
-                provider="github",
-                operation=operation,
-                outcome="circuit_open",
+                provider="github", operation=operation, outcome="circuit_open"
             ).inc()
             raise GitHubSourceError("GitHub provider circuit is open") from exc
 
@@ -139,9 +142,7 @@ class GitHubApiClient:
             except httpx.HTTPStatusError as exc:
                 await self._breaker.record_success()
                 PROVIDER_REQUESTS.labels(
-                    provider="github",
-                    operation=operation,
-                    outcome="http_error",
+                    provider="github", operation=operation, outcome="http_error"
                 ).inc()
                 raise GitHubSourceError(
                     f"GitHub request failed ({response.status_code}) for {path}"
@@ -152,23 +153,17 @@ class GitHubApiClient:
                 payload = response.json()
             except ValueError as exc:
                 PROVIDER_REQUESTS.labels(
-                    provider="github",
-                    operation=operation,
-                    outcome="invalid_response",
+                    provider="github", operation=operation, outcome="invalid_response"
                 ).inc()
                 raise GitHubSourceError(f"Unexpected GitHub response for {path}") from exc
             if not isinstance(payload, dict):
                 PROVIDER_REQUESTS.labels(
-                    provider="github",
-                    operation=operation,
-                    outcome="invalid_response",
+                    provider="github", operation=operation, outcome="invalid_response"
                 ).inc()
                 raise GitHubSourceError(f"Unexpected GitHub response for {path}")
 
             PROVIDER_REQUESTS.labels(
-                provider="github",
-                operation=operation,
-                outcome="success",
+                provider="github", operation=operation, outcome="success"
             ).inc()
             return payload
 
@@ -176,9 +171,7 @@ class GitHubApiClient:
         if opened:
             PROVIDER_CIRCUIT_OPEN.labels(provider="github", event="opened").inc()
         PROVIDER_REQUESTS.labels(
-            provider="github",
-            operation=operation,
-            outcome="transient_failure",
+            provider="github", operation=operation, outcome="transient_failure"
         ).inc()
         if transient_error is None:
             transient_error = RuntimeError(transient_reason)
@@ -196,9 +189,7 @@ class GitHubApiClient:
         retry_after: float | None,
     ) -> None:
         PROVIDER_RETRIES.labels(
-            provider="github",
-            operation=operation,
-            reason=reason,
+            provider="github", operation=operation, reason=reason
         ).inc()
         delay = await sleep_before_retry(
             attempt,
