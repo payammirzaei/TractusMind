@@ -83,6 +83,20 @@ def _regression(record: RegressionRecord) -> RegressionResponse:
     return RegressionResponse(**record.__dict__)
 
 
+def _benchmark_payload(record: RegressionRecord) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "id": record.case_id,
+        "category": f"production-{record.root_cause}",
+        "question": record.question,
+        "expected_sources": record.expected_source_ids,
+        "expected_terms": record.expected_terms,
+        "source_interaction_id": record.interaction_id,
+    }
+    if record.benchmark_kind == "answer":
+        payload["answerable"] = not record.expected_abstain
+    return payload
+
+
 @router.get("/summary", response_model=QualitySummary)
 async def summary(request: Request) -> QualitySummary:
     cases = await request.app.state.quality_store.list_regressions(limit=1_000)
@@ -139,6 +153,11 @@ async def decide_review(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="benchmark_kind is required when promoting a review",
         )
+    if payload.benchmark_kind != "answer" and payload.expected_abstain:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Only answer benchmarks can encode expected abstention",
+        )
     if not payload.expected_abstain and not (
         payload.expected_source_ids or payload.expected_terms
     ):
@@ -183,21 +202,7 @@ async def export_regressions(
         benchmark_kind=benchmark_kind,
         limit=10_000,
     )
-    lines = [
-        json.dumps(
-            {
-                "id": record.case_id,
-                "question": record.question,
-                "expected_sources": record.expected_source_ids,
-                "expected_terms": record.expected_terms,
-                "expected_abstain": record.expected_abstain,
-                "root_cause": record.root_cause,
-                "source_interaction_id": record.interaction_id,
-            },
-            sort_keys=True,
-        )
-        for record in records
-    ]
+    lines = [json.dumps(_benchmark_payload(record), sort_keys=True) for record in records]
     body = "\n".join(lines)
     if body:
         body += "\n"
