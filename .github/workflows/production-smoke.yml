@@ -1,0 +1,38 @@
+name: Production Smoke
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 5 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.PRODUCTION_SMOKE_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      TRACTUSMIND_PRODUCTION_URL: ${{ vars.TRACTUSMIND_PRODUCTION_URL }}
+      TRACTUSMIND_PRODUCTION_SMOKE_API_KEY: ${{ secrets.TRACTUSMIND_PRODUCTION_SMOKE_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Validate production smoke configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$TRACTUSMIND_PRODUCTION_URL" || {
+            echo "Repository/environment variable TRACTUSMIND_PRODUCTION_URL is required"
+            exit 2
+          }
+          test -n "$TRACTUSMIND_PRODUCTION_SMOKE_API_KEY" || {
+            echo "Environment secret TRACTUSMIND_PRODUCTION_SMOKE_API_KEY is required"
+            exit 2
+          }
+
+      - name: Smoke live Mission Control + backend dependencies
+        run: python scripts/production_smoke.py
