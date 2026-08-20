@@ -1,0 +1,66 @@
+name: Quality Infra Smoke
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/quality-infra-smoke.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17.10-alpine
+        env:
+          POSTGRES_DB: tractusmind
+          POSTGRES_USER: tractusmind
+          POSTGRES_PASSWORD: tractusmind
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tractusmind -d tractusmind"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      qdrant:
+        image: qdrant/qdrant:v1.19.0
+        ports:
+          - 6333:6333
+    env:
+      GITHUB_TOKEN_VALUE: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Verify public Tractus-X repository access
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$GITHUB_TOKEN_VALUE"
+          curl --fail --silent --show-error \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN_VALUE}" \
+            https://api.github.com/repos/eclipse-tractusx/tractusx-sdk \
+            | python -c 'import json,sys; data=json.load(sys.stdin); assert data["full_name"] == "eclipse-tractusx/tractusx-sdk"'
+
+      - name: Verify ephemeral Qdrant readiness and API
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:6333/readyz >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:6333/collections \
+            | python -c 'import json,sys; data=json.load(sys.stdin); assert data["status"] == "ok"'
+
+      - name: Verify ephemeral Postgres connectivity
+        env:
+          PGPASSWORD: tractusmind
+        run: psql -h 127.0.0.1 -U tractusmind -d tractusmind -c 'select 1;' >/dev/null
