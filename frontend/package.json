@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "smoke": "node scripts/smoke-routes.mjs"
+    "smoke": "node scripts/smoke-routes.mjs",
+    "smoke:bff": "node scripts/smoke-bff.mjs",
+    "mock:backend": "node scripts/mock-backend.mjs"
   },
   "dependencies": {
     "class-variance-authority": "0.7.1",
