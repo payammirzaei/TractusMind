@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import json
 
+from app.chunking import SmartChunker
 from app.core.config import get_settings
 from app.ingestion.pipeline import SourceIngestionPipeline
 from app.ingestion.registry import get_source
@@ -17,6 +18,10 @@ def _parser() -> argparse.ArgumentParser:
     fetch = subparsers.add_parser("fetch", help="Fetch selected source documents")
     fetch.add_argument("source_id")
     fetch.add_argument("--limit", type=int, default=3)
+
+    chunk = subparsers.add_parser("chunk", help="Fetch and smart-chunk selected source documents")
+    chunk.add_argument("source_id")
+    chunk.add_argument("--limit", type=int, default=3)
 
     return parser
 
@@ -46,6 +51,39 @@ async def _run(args: argparse.Namespace) -> None:
             return
 
         manifest, documents = await pipeline.fetch(source, limit=args.limit)
+
+        if args.command == "chunk":
+            chunks = SmartChunker().chunk_many(documents)
+            print(
+                json.dumps(
+                    {
+                        "source_id": manifest.source_id,
+                        "repository": manifest.repository,
+                        "commit_sha": manifest.commit_sha,
+                        "document_count": len(documents),
+                        "chunk_count": len(chunks),
+                        "chunk_kinds": sorted({chunk.kind.value for chunk in chunks}),
+                        "chunks": [
+                            {
+                                "chunk_id": chunk.chunk_id,
+                                "path": chunk.path,
+                                "kind": chunk.kind.value,
+                                "symbol": chunk.symbol,
+                                "parent_symbol": chunk.parent_symbol,
+                                "section_path": chunk.section_path,
+                                "start_line": chunk.start_line,
+                                "end_line": chunk.end_line,
+                                "part": chunk.part,
+                                "source_url": chunk.line_source_url,
+                            }
+                            for chunk in chunks[:20]
+                        ],
+                    },
+                    indent=2,
+                )
+            )
+            return
+
         print(
             json.dumps(
                 {
