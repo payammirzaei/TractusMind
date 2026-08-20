@@ -5,6 +5,7 @@ from app.embeddings.service import DenseEmbeddingService
 from app.embeddings.sparse import SparseEmbeddingService
 from app.generation.llm import LLMConfigurationError, OpenAICompatibleLLM
 from app.generation.service import GroundedAnswerService
+from app.generation.verification import ClaimVerifier
 from app.reranking.service import CrossEncoderReranker
 from app.retrieval.hybrid import HybridRetrievalService
 from app.retrieval.reranked import RerankedRetrievalService
@@ -49,6 +50,10 @@ def create_grounded_answer_service(
     return GroundedAnswerService(
         retrieval=retrieval,
         llm=llm,
+        verifier=ClaimVerifier(
+            llm,
+            max_claims=settings.verification_max_claims,
+        ),
         evidence_limit=settings.rerank_top_k,
         context_max_chars=settings.generation_context_max_chars,
         minimum_rerank_score=settings.minimum_relevance_score,
