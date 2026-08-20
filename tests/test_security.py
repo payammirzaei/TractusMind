@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -83,3 +84,12 @@ def test_settings_parse_trusted_hosts_and_cors() -> None:
         "https://ui.example.com",
         "https://admin.example.com",
     ]
+
+
+def test_oidc_rejects_symmetric_signing_algorithms() -> None:
+    with pytest.raises(ValueError, match="asymmetric signing only"):
+        Settings(
+            oidc_enabled=True,
+            oidc_issuer_url="https://id.example.com/realms/tractusmind",
+            oidc_allowed_algorithms="HS256",
+        )
