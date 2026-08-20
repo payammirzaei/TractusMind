@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
 from app.api.ops_auth import require_ops_admin
-from app.auth.store import UserCredential, UserIdentity
+from app.auth.store import UserCredential, UserIdentity, UserRole
 
 router = APIRouter(
     prefix="/v1/ops/users",
@@ -17,8 +17,10 @@ router = APIRouter(
 class UserResponse(BaseModel):
     user_id: str
     display_name: str
-    api_key_prefix: str
+    api_key_prefix: str | None
     enabled: bool
+    role: UserRole
+    auth_type: str
 
 
 class UserCredentialResponse(UserResponse):
@@ -27,10 +29,12 @@ class UserCredentialResponse(UserResponse):
 
 class CreateUserRequest(BaseModel):
     display_name: str = Field(min_length=1, max_length=120)
+    role: UserRole = UserRole.USER
 
 
 class UserStateRequest(BaseModel):
-    enabled: bool
+    enabled: bool | None = None
+    role: UserRole | None = None
 
 
 def _user(identity: UserIdentity) -> UserResponse:
@@ -64,7 +68,10 @@ async def create_user(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="display_name must not be blank",
         )
-    credential = await request.app.state.auth_store.create_user(display_name)
+    credential = await request.app.state.auth_store.create_user(
+        display_name,
+        role=payload.role,
+    )
     return _credential(credential)
 
 
@@ -72,7 +79,10 @@ async def create_user(
 async def rotate_user_key(user_id: UUID, request: Request) -> UserCredentialResponse:
     credential = await request.app.state.auth_store.rotate_api_key(str(user_id))
     if credential is None:
-        raise HTTPException(status_code=404, detail="Unknown user")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Unknown user or identity does not use an API key",
+        )
     return _credential(credential)
 
 
@@ -82,7 +92,16 @@ async def update_user_state(
     payload: UserStateRequest,
     request: Request,
 ) -> UserResponse:
-    identity = await request.app.state.auth_store.set_enabled(str(user_id), payload.enabled)
+    if payload.enabled is None and payload.role is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="At least one of enabled or role is required",
+        )
+    identity = await request.app.state.auth_store.update_user(
+        str(user_id),
+        enabled=payload.enabled,
+        role=payload.role,
+    )
     if identity is None:
         raise HTTPException(status_code=404, detail="Unknown user")
     return _user(identity)
