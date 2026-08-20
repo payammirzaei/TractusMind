@@ -100,6 +100,12 @@ async def _run_search(args: argparse.Namespace, settings: Settings) -> None:
                             if hit.rerank_score is not None
                             else None
                         ),
+                        "debug_score": (
+                            round(hit.debug_score, 6)
+                            if hit.debug_score is not None
+                            else None
+                        ),
+                        "retrieval_methods": hit.retrieval_methods,
                         "source_id": hit.source_id,
                         "repository": hit.repository,
                         "component": hit.component,
