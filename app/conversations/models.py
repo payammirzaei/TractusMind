@@ -49,6 +49,7 @@ class AnswerInteraction(Base):
         ForeignKey("conversation.conversation_id", ondelete="CASCADE"),
         index=True,
     )
+    request_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
     question: Mapped[str] = mapped_column(Text)
     answer: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(32), index=True)
