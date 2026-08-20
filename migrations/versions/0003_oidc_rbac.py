@@ -32,23 +32,56 @@ def _index_names(table_name: str) -> set[str]:
 
 def upgrade() -> None:
     columns = _column_names("app_user")
-    if "auth_type" not in columns:
+    added_auth_type = "auth_type" not in columns
+    added_role = "role" not in columns
+    if added_auth_type:
         op.add_column(
             "app_user",
-            sa.Column("auth_type", sa.String(length=20), nullable=False, server_default="api_key"),
+            sa.Column(
+                "auth_type",
+                sa.String(length=20),
+                nullable=False,
+                server_default="api_key",
+            ),
         )
-    if "role" not in columns:
+    if added_role:
         op.add_column(
             "app_user",
-            sa.Column("role", sa.String(length=20), nullable=False, server_default="user"),
+            sa.Column(
+                "role",
+                sa.String(length=20),
+                nullable=False,
+                server_default="user",
+            ),
         )
     if "oidc_issuer" not in columns:
-        op.add_column("app_user", sa.Column("oidc_issuer", sa.String(length=500), nullable=True))
+        op.add_column(
+            "app_user",
+            sa.Column("oidc_issuer", sa.String(length=500), nullable=True),
+        )
     if "oidc_subject" not in columns:
-        op.add_column("app_user", sa.Column("oidc_subject", sa.String(length=500), nullable=True))
+        op.add_column(
+            "app_user",
+            sa.Column("oidc_subject", sa.String(length=500), nullable=True),
+        )
 
-    op.alter_column("app_user", "api_key_prefix", existing_type=sa.String(length=16), nullable=True)
-    op.alter_column("app_user", "api_key_hash", existing_type=sa.String(length=64), nullable=True)
+    if added_auth_type:
+        op.alter_column("app_user", "auth_type", server_default=None)
+    if added_role:
+        op.alter_column("app_user", "role", server_default=None)
+
+    op.alter_column(
+        "app_user",
+        "api_key_prefix",
+        existing_type=sa.String(length=16),
+        nullable=True,
+    )
+    op.alter_column(
+        "app_user",
+        "api_key_hash",
+        existing_type=sa.String(length=64),
+        nullable=True,
+    )
 
     indexes = _index_names("app_user")
     if "ix_app_user_auth_type" not in indexes:
@@ -79,8 +112,18 @@ def downgrade() -> None:
     if "ix_app_user_auth_type" in indexes:
         op.drop_index("ix_app_user_auth_type", table_name="app_user")
 
-    op.alter_column("app_user", "api_key_hash", existing_type=sa.String(length=64), nullable=False)
-    op.alter_column("app_user", "api_key_prefix", existing_type=sa.String(length=16), nullable=False)
+    op.alter_column(
+        "app_user",
+        "api_key_hash",
+        existing_type=sa.String(length=64),
+        nullable=False,
+    )
+    op.alter_column(
+        "app_user",
+        "api_key_prefix",
+        existing_type=sa.String(length=16),
+        nullable=False,
+    )
     for name in ("oidc_subject", "oidc_issuer", "role", "auth_type"):
         if name in _column_names("app_user"):
             op.drop_column("app_user", name)
