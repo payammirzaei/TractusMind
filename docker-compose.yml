@@ -1,4 +1,12 @@
 services:
+  migrate:
+    build: .
+    command: tractusmind-db upgrade
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   api:
     build: .
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
@@ -8,6 +16,8 @@ services:
     ports:
       - "8000:8000"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -33,6 +43,8 @@ services:
       - "9101"
       - "9191"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       postgres:
