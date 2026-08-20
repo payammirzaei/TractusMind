@@ -12,6 +12,7 @@ services:
     networks: [backend]
     read_only: true
     tmpfs: [/tmp]
+    init: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     depends_on:
@@ -45,12 +46,13 @@ services:
       - llm_api_key
       - ops_admin_key
       - metrics_admin_key
-    networks: [edge, backend]
+    networks: [edge, egress, backend]
     expose: ["8000"]
     volumes:
       - model_cache:/home/app/.cache
     read_only: true
     tmpfs: [/tmp]
+    init: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     mem_limit: ${API_MEMORY_LIMIT:-4g}
@@ -95,13 +97,14 @@ services:
       - database_url
       - redis_url
       - github_token
-    networks: [backend]
+    networks: [egress, backend]
     expose: ["9101", "9191"]
     volumes:
       - model_cache:/home/app/.cache
       - ./config:/app/config:ro
     read_only: true
     tmpfs: [/tmp]
+    init: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     mem_limit: ${WORKER_MEMORY_LIMIT:-6g}
@@ -132,6 +135,7 @@ services:
       - ./config:/app/config:ro
     read_only: true
     tmpfs: [/tmp]
+    init: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     mem_limit: ${SCHEDULER_MEMORY_LIMIT:-512m}
@@ -284,6 +288,7 @@ services:
 
 networks:
   edge:
+  egress:
   backend:
     internal: true
 
