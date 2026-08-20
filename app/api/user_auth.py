@@ -19,6 +19,12 @@ async def optional_user(
 ) -> UserIdentity | None:
     if authorization is None:
         return None
+
+    cached_header = getattr(request.state, "auth_header", None)
+    cached_identity = getattr(request.state, "auth_identity", None)
+    if cached_header == authorization and isinstance(cached_identity, UserIdentity):
+        return cached_identity
+
     scheme, _, token = authorization.partition(" ")
     if scheme.casefold() != "bearer" or not token:
         raise _invalid_token()
@@ -43,6 +49,8 @@ async def optional_user(
 
     if user is None:
         raise _invalid_token()
+    request.state.auth_header = authorization
+    request.state.auth_identity = user
     return user
 
 
