@@ -66,6 +66,9 @@ def test_qdrant_payload_keeps_exact_traceability() -> None:
     assert payload["commit_sha"] == "a" * 40
     assert payload["symbol"] == "create_asset"
     assert payload["parent_symbol"] == "BaseConnectorService"
+    assert "tractusx_sdk/dataspace/services/connector.py" in payload["debug_text"]
+    assert "BaseConnectorService" in payload["debug_text"]
+    assert "create_asset" in payload["debug_text"]
     assert payload["line_source_url"].endswith("#L120-L121")
     assert payload["embedding_model"] == "BAAI/bge-small-en-v1.5"
     assert payload["sparse_model"] == "Qdrant/bm25"
