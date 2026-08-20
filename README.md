@@ -123,8 +123,8 @@ question
 ```
 
 Evidence IDs such as `[S1]` are assigned by the backend. The model is not trusted to invent
-repository URLs, commit SHAs, paths, or line numbers. Structured `citation_ids` must exactly
-match inline citations in the generated answer.
+repository URLs, source IDs, commit SHAs, paths, or line numbers. Structured `citation_ids`
+must exactly match inline citations in the generated answer.
 
 The claim verifier performs a second pass over the answer and evidence. It breaks the answer
 into atomic factual claims and checks whether the citations attached to each claim directly
@@ -133,10 +133,6 @@ verifier output, and excessive claim counts all fail closed.
 
 If verification fails, TractusMind returns an abstention rather than a supposedly grounded
 answer. The verification report is preserved in the API response for inspection.
-
-Source evidence is treated as untrusted data in both generation and verification prompts to
-reduce prompt-injection risk. Missing LLM configuration does not prevent the API from starting;
-`/v1/ask` returns `503` until a provider is configured.
 
 ## Retrieval benchmark
 
@@ -156,9 +152,45 @@ Current retrieval metrics:
 - NDCG@K
 - per-question first relevant rank and source trace
 
-A benchmark hit is intentionally strict: the returned chunk must come from an expected source
-and contain all expected terms for that case. Relevance thresholds remain unset until calibrated
-from measured Tractus-X results rather than guessed from raw scores.
+## Answer evaluation and abstention calibration
+
+`benchmarks/answer_v0.jsonl` contains 10 answerable Tractus-X questions and 6 deliberately
+unanswerable negative cases. The negative set prevents an always-answer system from looking
+artificially good.
+
+Calibrate the reranker evidence threshold without calling the LLM:
+
+```bash
+tractusmind-answer-eval calibrate --max-unsafe-rate 0
+```
+
+The calibration sweep reports:
+
+- recommended `MINIMUM_RELEVANCE_SCORE`
+- true accept rate on answerable questions
+- false abstention rate
+- unsafe evidence accept rate on negative questions
+- balanced accuracy
+
+The recommended value is printed as an environment-variable assignment. It is not written into
+the repository automatically because calibration depends on the indexed corpus and reranker.
+
+With an LLM provider configured, run the full answer gate:
+
+```bash
+tractusmind-answer-eval evaluate
+```
+
+End-to-end metrics:
+
+- grounded answer accuracy
+- citation correctness against expected source IDs
+- claim support rate from the verification report
+- false abstention rate on answerable cases
+- unsafe answer rate on unanswerable cases
+
+Calibration and answer evaluation are intentionally separate. The former measures the evidence
+acceptance boundary without LLM variability; the latter measures the complete production path.
 
 ## Design principle
 
@@ -172,6 +204,7 @@ question
   -> RRF fusion
   -> hybrid score
   -> rerank score
+  -> evidence threshold
   -> final evidence
   -> generated answer
   -> citation validation
@@ -185,7 +218,7 @@ See [`docs/architecture.md`](docs/architecture.md) for the architecture contract
 
 ## Current milestone
 
-**V4 — Claim-Verified Grounded Answers**
+**V5 — Answer Evaluation and Abstention Calibration**
 
 - [x] FastAPI service shell
 - [x] Qdrant/PostgreSQL/Redis connectivity contract
@@ -206,12 +239,16 @@ See [`docs/architecture.md`](docs/architecture.md) for the architecture contract
 - [x] OpenAI-compatible grounded generation provider
 - [x] Backend-owned citation IDs and exact source mapping
 - [x] `/v1/ask` API endpoint
-- [x] Prompt-injection-aware evidence framing
 - [x] Structured/inline citation consistency gate
 - [x] Atomic claim extraction and evidence verification
 - [x] Fail-closed answer gate with verification report
-- [ ] calibrated relevance / abstention thresholds
-- [ ] answer-level groundedness and citation evaluation dataset
+- [x] Positive + negative answerability benchmark seed
+- [x] Safety-first reranker threshold calibration
+- [x] Grounded answer accuracy metric
+- [x] Citation correctness metric
+- [x] Claim support rate metric
+- [x] False abstention and unsafe answer metrics
+- [ ] run calibration against a fully indexed corpus and persist the measured threshold
 - [ ] version-aware query routing
 - [ ] debugging-specific retrieval lane
 
