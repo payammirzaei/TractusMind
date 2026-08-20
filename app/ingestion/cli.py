@@ -46,9 +46,7 @@ def _dense_service(settings: Settings):
     qdrant = create_qdrant_client(settings)
     embedder = DenseEmbeddingService(
         settings.embedding_model,
-        query_prefix=settings.embedding_query_prefix,
         batch_size=settings.embedding_batch_size,
-        device=settings.embedding_device,
     )
     retrieval = DenseRetrievalService(
         qdrant=qdrant,
