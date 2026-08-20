@@ -7,6 +7,7 @@ from opentelemetry import trace
 @dataclass
 class AnswerTrace:
     stage_durations: dict[str, float] = field(default_factory=dict)
+    metadata: dict[str, object] = field(default_factory=dict)
 
 
 _TRACE_CONTEXT: ContextVar[AnswerTrace | None] = ContextVar(
@@ -25,6 +26,12 @@ def record_stage_duration(stage: str, duration_seconds: float) -> None:
         current.stage_durations[stage] = (
             current.stage_durations.get(stage, 0.0) + duration_seconds
         )
+
+
+def record_trace_metadata(key: str, value: object) -> None:
+    current = _TRACE_CONTEXT.get()
+    if current is not None:
+        current.metadata[key] = value
 
 
 def finish_answer_trace(token: Token) -> AnswerTrace:
