@@ -33,6 +33,9 @@ class Settings(BaseSettings):
 
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     embedding_batch_size: int = Field(default=32, ge=1, le=256)
+    sparse_embedding_model: str = "Qdrant/bm25"
+    sparse_embedding_batch_size: int = Field(default=32, ge=1, le=256)
+    hybrid_prefetch_k: int = Field(default=40, ge=2, le=500)
     reranker_model: str = "BAAI/bge-reranker-base"
 
     s3_endpoint_url: str | None = None
