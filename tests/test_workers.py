@@ -2,8 +2,7 @@ import pytest
 
 from app.core.config import Settings
 from app.ingestion.models import SourceDefinition, SourcePriority
-from app.workers import scheduler
-from app.workers import sync as worker_sync
+from app.workers import scheduler, sync as worker_sync
 
 
 class FakeMessage:
@@ -78,8 +77,8 @@ async def test_worker_skips_source_when_distributed_lock_is_busy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     redis = FakeRedis(acquired=False)
-    monkeypatch.setattr(worker_sync, "get_source", lambda source_id: object())
-    monkeypatch.setattr(worker_sync, "create_redis_client", lambda settings: redis)
+    monkeypatch.setattr(worker_sync, "get_source", lambda _source_id: object())
+    monkeypatch.setattr(worker_sync, "create_redis_client", lambda _settings: redis)
 
     result = await worker_sync.run_source_sync(
         "tractusx-sdk",
@@ -97,10 +96,10 @@ async def test_worker_releases_lock_when_resource_setup_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     redis = FakeRedis(acquired=True)
-    monkeypatch.setattr(worker_sync, "get_source", lambda source_id: object())
-    monkeypatch.setattr(worker_sync, "create_redis_client", lambda settings: redis)
+    monkeypatch.setattr(worker_sync, "get_source", lambda _source_id: object())
+    monkeypatch.setattr(worker_sync, "create_redis_client", lambda _settings: redis)
 
-    def fail_engine(settings: Settings):
+    def fail_engine(_settings: Settings):
         raise RuntimeError("postgres unavailable")
 
     monkeypatch.setattr(worker_sync, "create_postgres_engine", fail_engine)
