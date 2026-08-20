@@ -15,6 +15,7 @@ def _record() -> InteractionRecord:
     return InteractionRecord(
         interaction_id=_INTERACTION_ID,
         conversation_id="11111111-1111-4111-8111-111111111111",
+        request_id="request-1",
         question="How do I use the SDK?",
         answer="Use the SDK evidence [S1].",
         status="completed",
@@ -74,6 +75,7 @@ def test_admin_can_inspect_persisted_interactions(monkeypatch) -> None:
     assert response.status_code == 200
     payload = response.json()[0]
     assert payload["interaction_id"] == _INTERACTION_ID
+    assert payload["request_id"] == "request-1"
     assert payload["stage_durations"]["retrieval"] == 0.1
     assert payload["feedback_rating"] == "up"
 
