@@ -63,17 +63,18 @@ class ProviderCircuitBreaker:
             return should_open
 
 
-_SHARED_BREAKERS: dict[tuple[str, int, float], ProviderCircuitBreaker] = {}
+_SHARED_BREAKERS: dict[tuple[str, str, int, float], ProviderCircuitBreaker] = {}
 _SHARED_BREAKERS_LOCK = Lock()
 
 
 def shared_provider_circuit(
     *,
     provider: str,
+    scope: str,
     failure_threshold: int,
     cooldown_seconds: float,
 ) -> ProviderCircuitBreaker:
-    key = (provider, failure_threshold, cooldown_seconds)
+    key = (provider, scope, failure_threshold, cooldown_seconds)
     with _SHARED_BREAKERS_LOCK:
         breaker = _SHARED_BREAKERS.get(key)
         if breaker is None:
