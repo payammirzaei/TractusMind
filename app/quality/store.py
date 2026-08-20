@@ -29,6 +29,8 @@ class ReviewRecord:
     intent: str | None
     error_type: str | None
     feedback_rating: str | None
+    feedback_reason: str | None
+    feedback_comment: str | None
     created_at: datetime
     reviewed_at: datetime | None
 
@@ -75,12 +77,7 @@ class QualityStore:
             inserted = await session.scalar(
                 pg_insert(QualityReview)
                 .values(interaction_id=interaction_id, trigger=trigger)
-                .on_conflict_do_nothing(
-                    index_elements=[
-                        QualityReview.interaction_id,
-                        QualityReview.trigger,
-                    ]
-                )
+                .on_conflict_do_nothing(index_elements=["interaction_id", "trigger"])
                 .returning(QualityReview.review_id)
             )
             if inserted is not None:
@@ -252,6 +249,8 @@ class QualityStore:
             intent=interaction.intent,
             error_type=interaction.error_type,
             feedback_rating=feedback.rating if feedback else None,
+            feedback_reason=feedback.reason if feedback else None,
+            feedback_comment=feedback.comment if feedback else None,
             created_at=review.created_at,
             reviewed_at=review.reviewed_at,
         )
