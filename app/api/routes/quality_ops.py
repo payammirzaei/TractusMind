@@ -99,10 +99,9 @@ def _benchmark_payload(record: RegressionRecord) -> dict[str, object]:
 
 @router.get("/summary", response_model=QualitySummary)
 async def summary(request: Request) -> QualitySummary:
-    cases = await request.app.state.quality_store.list_regressions(limit=1_000)
     return QualitySummary(
         review_counts=await request.app.state.quality_store.review_counts(),
-        regression_cases=len(cases),
+        regression_cases=await request.app.state.quality_store.regression_count(),
     )
 
 
@@ -202,7 +201,7 @@ async def regressions(
 @router.get("/regressions/export", response_class=Response)
 async def export_regressions(
     request: Request,
-    benchmark_kind: Annotated[BenchmarkKind | None, Query()] = None,
+    benchmark_kind: Annotated[BenchmarkKind, Query()],
 ) -> Response:
     records = await request.app.state.quality_store.list_regressions(
         benchmark_kind=benchmark_kind,
