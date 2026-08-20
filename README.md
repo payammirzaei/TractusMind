@@ -23,13 +23,15 @@ inspectability, production safety, and measurable evaluation come before UI work
 - persisted conversations, traces, and user feedback
 - opaque bearer users + owned bounded conversation history
 - human-reviewed feedback/failure regression loop
-- production evaluation/quality gate
 - Alembic versioned PostgreSQL migrations + drift checking
 - Prometheus + optional OpenTelemetry
 - provisioned Grafana dashboards + Alertmanager rules
 - hardened production Compose topology + automatic TLS edge
 - Docker secret-file loading, request limits, private networks, and resource guards
 - Trivy security CI + tagged GHCR release images with SBOM/provenance
+- six-source full-corpus validation and calibration workflow
+- upstream freshness-aware corpus contract
+- production quality gate over V1 retrieval/answer datasets
 
 ## Local development
 
@@ -60,7 +62,7 @@ pytest -q
 
 ## Production deployment
 
-Production uses a separate topology:
+Production uses `docker-compose.prod.yml` with Caddy as the only public edge.
 
 ```text
 Internet
@@ -90,44 +92,10 @@ docker compose --env-file .env.production -f docker-compose.prod.yml build
 docker compose --env-file .env.production -f docker-compose.prod.yml up -d
 ```
 
-Only Caddy publishes the application edge. PostgreSQL, Redis, and Qdrant have no host ports.
-Grafana/Prometheus/Alertmanager bind only to loopback for SSH-tunneled operator access.
-
-Production adds:
-
-- automatic TLS + HSTS/security headers
-- TrustedHost + explicit CORS policy
-- request-body, rate, and concurrency guards
-- interactive API docs disabled by default
-- Docker `*_FILE` secrets instead of plaintext application credentials
-- read-only application roots, dropped capabilities, `no-new-privileges`
-- graceful shutdown and configurable CPU/memory limits
-- pinned infrastructure release tags
-- PostgreSQL backup/restore scripts
-- Trivy filesystem/image security gates
-- tagged multi-architecture GHCR images with SBOM/provenance
+PostgreSQL, Redis, and Qdrant have no public host ports. Grafana, Prometheus, and Alertmanager bind
+only to loopback for operator access.
 
 See [`docs/production-deployment.md`](docs/production-deployment.md).
-
-## Database migrations
-
-PostgreSQL schema changes are Alembic-only. Runtime code never silently creates or alters tables.
-
-```text
-0001_core_schema
-  -> 0002_user_auth   (head)
-```
-
-```bash
-tractusmind-db bootstrap
-tractusmind-db upgrade
-tractusmind-db check
-tractusmind-db drift
-tractusmind-db current
-tractusmind-db history
-```
-
-See [`docs/database-migrations.md`](docs/database-migrations.md).
 
 ## Source synchronization
 
@@ -136,15 +104,12 @@ commits before content is fetched.
 
 ```bash
 tractusmind-ingest discover tractusx-sdk
-tractusmind-ingest fetch tractusx-sdk --limit 3
-tractusmind-ingest chunk tractusx-sdk --limit 3
-tractusmind-ingest index tractusx-sdk --limit 10
 tractusmind-ingest sync tractusx-sdk
+tractusmind-ingest enqueue-all
 ```
 
-Incremental sync classifies files as added/modified/deleted/unchanged and only re-embeds changed
-content. Provenance separates the repository snapshot from the exact content commit used by a
-citation.
+Incremental synchronization re-embeds only changed files and keeps repository snapshot provenance
+separate from the exact content commit used for citations.
 
 See [`docs/incremental-ingestion.md`](docs/incremental-ingestion.md) and
 [`docs/background-ingestion.md`](docs/background-ingestion.md).
@@ -170,6 +135,82 @@ question
 History is context, not evidence. Previous assistant answers cannot become source citations.
 Explicit `ref:` and `commit:` constraints fail closed when indexed provenance is unavailable.
 
+## Full-corpus validation
+
+V20 defines a benchmark run as valid only after the corpus itself passes a fail-closed contract.
+
+```bash
+tractusmind-corpus-validate --verify-upstream
+```
+
+For every enabled source the validator checks:
+
+- PostgreSQL successful source state
+- matching successful ingestion run
+- configured repository/component/ref identity
+- Qdrant chunks for the same snapshot
+- no stale chunks from older snapshots
+- current upstream GitHub ref equals the indexed snapshot
+
+The V1 benchmark sets cover every enabled source:
+
+```text
+benchmarks/full_corpus_v1.jsonl
+benchmarks/answer_v1.jsonl
+benchmarks/debug_v0.jsonl
+```
+
+The six enabled knowledge sources are SDK, EDC, Digital Twin Registry, semantic models,
+Tractus-X documentation, and Tractus-X release metadata.
+
+### Measurement workflow
+
+`.github/workflows/full-corpus-validation.yml` uses the dedicated GitHub `quality` environment:
+
+```text
+optional full incremental refresh
+        ↓
+corpus + upstream freshness validation
+        ↓
+dense / hybrid / rerank benchmark
+        ↓
+debug benchmark
+        ↓
+zero-unsafe evidence calibration
+        ↓
+answer evaluation at measured threshold
+        ↓
+reviewed regressions
+        ↓
+validation-summary.json
+        ↓
+pin-candidate.toml
+```
+
+The workflow records source/upstream commits, model identities, registry/config/dataset SHA-256
+values, retrieval metrics, answer metrics, and the measured threshold in a 90-day artifact.
+
+**The measured threshold is never auto-committed.** Human review is required before copying it into
+`config/quality_gate.toml`.
+
+See [`docs/full-corpus-validation.md`](docs/full-corpus-validation.md).
+
+## Production quality gate
+
+After a full-corpus threshold has been reviewed and pinned, the weekly production quality gate:
+
+1. rejects missing, inconsistent, or stale corpus snapshots;
+2. recalibrates against `answer_v1.jsonl`;
+3. rejects threshold drift beyond the configured tolerance;
+4. requires zero unsafe answer rate;
+5. requires zero unsafe evidence acceptance;
+6. requires every committed human-reviewed regression to pass.
+
+Raw feedback never becomes gold data automatically.
+
+See [`docs/quality-loop.md`](docs/quality-loop.md) and
+[`docs/quality-gate.md`](docs/quality-gate.md).
+
 ## Provider resilience
 
 LLM and GitHub calls use bounded retries for transient failures, exponential backoff with jitter,
@@ -185,104 +226,71 @@ only token digests/prefixes. Authenticated conversations have an owner and cross
 `404` to avoid leaking existence.
 
 ```text
-GET /v1/conversations
-GET /v1/conversations/{conversation_id}
+GET  /v1/conversations
+GET  /v1/conversations/{conversation_id}
 POST /v1/feedback
 ```
 
 See [`docs/authenticated-conversations.md`](docs/authenticated-conversations.md) and
 [`docs/conversation-feedback.md`](docs/conversation-feedback.md).
 
-## Human-reviewed quality loop
-
-```text
-failed answer / down-vote
-          |
-          v
- pending quality review
-          |
-     human root cause
-       /       \
-  dismiss    promote
-                |
-         regression case
-                |
-         benchmark export
-                |
-          evaluation gate
-```
-
-Raw feedback never becomes gold data automatically.
-
-See [`docs/quality-loop.md`](docs/quality-loop.md) and
-[`docs/quality-gate.md`](docs/quality-gate.md).
-
 ## Observability
 
 Prometheus captures API/RAG/model/provider/ingestion/worker/quality signals. Grafana ships with
-provisioned API/RAG, provider/ingestion, and quality-loop dashboards. Alert rules cover target
-availability, API errors/latency, provider circuit/retry pressure, pipeline errors, ingestion/worker
-failures, and quality-review spikes.
-
-```text
-API metrics       /metrics
-Grafana           3000
-Prometheus        9090
-Alertmanager      9093
-```
-
-Production operator ports bind only to `127.0.0.1`. Prometheus authenticates to the API metrics
-endpoint using a Docker-secret Bearer credential.
+provisioned API/RAG, provider/ingestion, and quality-loop dashboards. Alert rules cover availability,
+API errors/latency, provider pressure, pipeline failures, ingestion failures, and quality-review
+signals.
 
 See [`docs/observability.md`](docs/observability.md) and
 [`docs/grafana-alerting.md`](docs/grafana-alerting.md).
 
-## Backup
+## Database migrations
+
+PostgreSQL schema changes are Alembic-only. Runtime code never silently creates or alters tables.
 
 ```bash
-sh scripts/backup-postgres.sh
-RESTORE_CONFIRM=YES sh scripts/restore-postgres.sh backups/<dump-file>
+tractusmind-db bootstrap
+tractusmind-db upgrade
+tractusmind-db check
+tractusmind-db drift
 ```
 
-PostgreSQL and Qdrant must be recovered as a consistent set, or the vector corpus must be rebuilt
-from immutable source repositories before answers are served.
+See [`docs/database-migrations.md`](docs/database-migrations.md).
 
 ## Current milestone
 
-**V19 — Production Deployment & Security Hardening**
+**V20 — Full-Corpus Validation & Calibration**
 
-Completed:
+Completed in code and CI contracts:
 
-- [x] source-grounded ingestion/retrieval/generation pipeline
-- [x] version-aware routing + exact debug retrieval
-- [x] grounded citations + atomic claim verification
-- [x] incremental PostgreSQL/Qdrant synchronization
-- [x] scheduler/worker + Redis distributed source locks
-- [x] conversations, feedback, human quality review, and regression promotion
-- [x] production evaluation gate
-- [x] authenticated user-owned bounded history
-- [x] versioned Alembic schema + legacy bootstrap + ORM drift gate
-- [x] provider retries/idempotency/circuit breakers
-- [x] Prometheus/OpenTelemetry/Grafana/Alertmanager observability
-- [x] production-only Compose topology with private backend network
-- [x] Caddy TLS edge and security headers
-- [x] Docker secret-file application configuration
-- [x] request-size/rate/concurrency/TrustedHost/CORS guards
-- [x] production healthchecks, graceful shutdown, and resource limits
-- [x] pinned infrastructure release tags
-- [x] PostgreSQL backup/guarded restore tooling
-- [x] Trivy filesystem + container image security workflow
-- [x] tagged GHCR release image workflow with SBOM/provenance
+- [x] fail-closed corpus validator across every enabled source
+- [x] PostgreSQL source/run consistency verification
+- [x] Qdrant current-snapshot and stale-snapshot verification
+- [x] optional upstream GitHub ref freshness verification
+- [x] six-source retrieval benchmark V1
+- [x] six-source answer/abstention benchmark V1
+- [x] CI contract requiring benchmark coverage for every enabled source
+- [x] dedicated full-corpus refresh/measurement workflow
+- [x] reproducible validation manifest with source/model/input hashes
+- [x] measured-threshold candidate evaluated before pinning
+- [x] production quality workflow upgraded from seed V0 to V1 full-corpus contracts
+- [x] pinned-threshold drift enforcement
+- [x] reviewed regression enforcement remains fail-closed
 
-Still measured/environment-dependent:
+Requires a real configured `quality` environment before numerical claims can be made:
 
-- [ ] run full-corpus debug benchmark and tune fusion weights
-- [ ] run live full-corpus abstention calibration and pin measured threshold
+- [ ] execute the first complete full-corpus V20 run
+- [ ] inspect retrieval/debug/answer metrics from the artifact
+- [ ] review and pin the measured `minimum_relevance_score`
+- [ ] rerun the production gate with the pinned value
+- [ ] tune debug fusion weights only if measured results justify a change
 - [ ] promote reviewed real production cases into committed regression files
-- [ ] connect real Alertmanager receiver/secrets
-- [ ] tune alerts and resource limits from measured traffic
-- [ ] add distributed rate limiting when deploying multiple API replicas
-- [ ] add OIDC/JWKS adapter if enterprise SSO is required
+
+Later milestones:
+
+- enterprise OIDC/JWKS identity adapter when needed
+- distributed rate limiting when multiple API replicas are deployed
+- UI / Mission Control after the backend quality contract is proven
 
 ## License
 
