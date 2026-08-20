@@ -8,6 +8,7 @@ from app.core.config import get_settings
 from app.ingestion.models import SourceDefinition
 from app.ingestion.registry import get_enabled_sources
 from app.observability.metrics import QUEUE_ENQUEUED
+from app.observability.server import start_process_metrics_server
 from app.workers.tasks import sync_source_task
 
 logger = structlog.get_logger()
@@ -39,6 +40,10 @@ def _parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = _parser().parse_args()
     settings = get_settings()
+    start_process_metrics_server(
+        settings.scheduler_metrics_port,
+        process_name="source-scheduler",
+    )
 
     while True:
         source_ids = enqueue_enabled_sources()
