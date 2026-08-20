@@ -53,21 +53,24 @@ def request(
     return status, body, response_headers
 
 
+def assert_dependency_health(body: object, *, surface: str) -> None:
+    if not isinstance(body, dict) or body.get("status") != "ok":
+        raise RuntimeError(f"{surface} readiness did not report ok: {body}")
+    checks = body.get("checks")
+    if not isinstance(checks, dict) or not all(
+        checks.get(name) == "ok" for name in ("postgres", "redis", "qdrant")
+    ):
+        raise RuntimeError(f"{surface} dependency checks are not green: {checks}")
+
+
 def wait_ready() -> None:
     deadline = time.monotonic() + TIMEOUT_SECONDS
     last_error = "not started"
     while time.monotonic() < deadline:
         try:
             _, body, _ = request(f"{API_URL}/health/ready")
-            if isinstance(body, dict) and body.get("status") == "ok":
-                checks = body.get("checks")
-                if isinstance(checks, dict) and all(
-                    checks.get(name) == "ok" for name in ("postgres", "redis", "qdrant")
-                ):
-                    return
-                last_error = f"dependency checks not ready: {checks}"
-            else:
-                last_error = f"unexpected readiness payload: {body}"
+            assert_dependency_health(body, surface="FastAPI")
+            return
         except Exception as exc:  # noqa: BLE001 - diagnostic loop
             last_error = str(exc)
         time.sleep(3)
@@ -78,11 +81,13 @@ def main() -> int:
     print("[integration] waiting for Postgres + Redis + Qdrant readiness")
     wait_ready()
 
-    print("[integration] verifying Mission Control route and BFF health")
+    print("[integration] verifying Mission Control and backend readiness through the BFF")
     request(f"{UI_URL}/overview")
-    _, health, _ = request(f"{UI_URL}/api/health")
-    if not isinstance(health, dict) or health.get("status") != "ok":
-        raise RuntimeError(f"Mission Control health did not report ok: {health}")
+    _, ui_health, _ = request(f"{UI_URL}/api/health")
+    if not isinstance(ui_health, dict) or ui_health.get("status") != "ok":
+        raise RuntimeError(f"Mission Control health did not report ok: {ui_health}")
+    _, backend_health, _ = request(f"{UI_URL}/api/backend/health/ready")
+    assert_dependency_health(backend_health, surface="Mission Control BFF")
 
     print("[integration] bootstrapping a real admin identity through FastAPI")
     _, credential, _ = request(
