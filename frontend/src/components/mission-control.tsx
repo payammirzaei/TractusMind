@@ -61,10 +61,38 @@ const NAV: NavItem[] = [
 
 const roleRank: Record<UserRole, number> = { user: 0, operator: 1, admin: 2 };
 
+const AUTH_ERRORS: Record<string, string> = {
+  sso_not_configured: "Enterprise SSO is not configured for this Mission Control.",
+  sso_unavailable: "Enterprise SSO is temporarily unavailable. You can retry or use an API key.",
+  provider_rejected: "The identity provider did not complete sign-in.",
+  invalid_sso_state: "The SSO transaction could not be verified. Start sign-in again.",
+  token_exchange_failed: "The identity provider could not exchange the authorization code.",
+  invalid_access_token: "The identity provider returned an invalid access token.",
+  identity_rejected: "The signed-in identity was rejected by TractusMind access policy.",
+};
+
 function LoginConsole({ onReady }: { onReady: (identity: Identity) => void }) {
   const [token, setToken] = useState("");
   const [pending, setPending] = useState(false);
+  const [ssoEnabled, setSsoEnabled] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/oidc/status", { cache: "no-store" })
+      .then(async (response) => response.ok ? response.json() : { enabled: false })
+      .then((payload) => { if (!cancelled) setSsoEnabled(payload.enabled === true); })
+      .catch(() => { if (!cancelled) setSsoEnabled(false); });
+
+    const url = new URL(window.location.href);
+    const authError = url.searchParams.get("auth_error");
+    if (authError) {
+      setError(AUTH_ERRORS[authError] ?? "Enterprise sign-in could not be completed.");
+      url.searchParams.delete("auth_error");
+      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+    return () => { cancelled = true; };
+  }, []);
 
   async function connect() {
     if (!token.trim()) return;
@@ -85,7 +113,7 @@ function LoginConsole({ onReady }: { onReady: (identity: Identity) => void }) {
 
   return (
     <main className="grid min-h-screen place-items-center p-5">
-      <motion.div initial={{ opacity: 0, scale: .98, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} className="tm-shell relative w-full max-w-[520px] rounded-[28px] p-3">
+      <motion.div initial={{ opacity: 0, scale: .98, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} className="tm-shell relative w-full max-w-[540px] rounded-[28px] p-3">
         <span className="tm-screw absolute left-4 top-4"/><span className="tm-screw absolute right-4 top-4"/><span className="tm-screw absolute bottom-4 left-4"/><span className="tm-screw absolute bottom-4 right-4"/>
         <div className="tm-well tm-scanline rounded-[20px] px-6 py-8 sm:px-9">
           <div className="mb-8 flex items-center gap-4">
@@ -94,17 +122,24 @@ function LoginConsole({ onReady }: { onReady: (identity: Identity) => void }) {
           </div>
           <Badge className="mb-5 border-emerald-300/15 text-emerald-300"><span className="tm-led"/> secure console</Badge>
           <h2 className="text-3xl font-semibold tracking-[-.035em]">Engineering intelligence,<br/><span className="text-slate-500">with the panels open.</span></h2>
-          <p className="mt-4 text-sm leading-6 text-slate-500">Connect with a TractusMind API key or an OIDC access token. The credential is stored only in an HttpOnly session cookie.</p>
-          <div className="mt-8">
+          <p className="mt-4 text-sm leading-6 text-slate-500">Enterprise identities and API keys converge on the same backend-validated, HttpOnly Mission Control session.</p>
+
+          {ssoEnabled && <div className="mt-8">
+            <a href="/api/oidc/login?return_to=%2F" className="tm-control flex h-12 w-full items-center justify-center gap-3 rounded-xl border-cyan-300/15 text-sm font-semibold text-cyan-100 hover:border-cyan-300/30"><ShieldCheck className="size-4 text-cyan-300"/>Continue with Enterprise SSO<ArrowRight className="size-4 text-slate-600"/></a>
+            <div className="mt-3 text-center text-[10px] leading-5 text-slate-600">Authorization Code + PKCE · backend role validation · no browser token storage</div>
+            <div className="my-6 flex items-center gap-3"><span className="h-px flex-1 bg-white/5"/><span className="tm-label">API key fallback</span><span className="h-px flex-1 bg-white/5"/></div>
+          </div>}
+
+          <div className={ssoEnabled ? "" : "mt-8"}>
             <label className="tm-label mb-2 block">Bearer credential</label>
             <div className="tm-well flex items-center gap-2 rounded-xl p-2">
               <KeyRound className="ml-2 size-4 text-slate-600"/>
-              <input type="password" value={token} onChange={(event) => setToken(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void connect(); }} placeholder="tm_... or enterprise JWT" autoComplete="off" className="min-w-0 flex-1 bg-transparent px-2 py-2 text-sm outline-none placeholder:text-slate-700"/>
+              <input type="password" value={token} onChange={(event) => setToken(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void connect(); }} placeholder="tm_... or access token" autoComplete="off" className="min-w-0 flex-1 bg-transparent px-2 py-2 text-sm outline-none placeholder:text-slate-700"/>
               <Button variant="primary" onClick={() => void connect()} disabled={pending || !token.trim()}>{pending ? "Verifying…" : "Connect"}</Button>
             </div>
-            {error && <div className="mt-3 rounded-lg border border-red-300/15 bg-red-300/5 p-3 text-xs text-red-200">{error}</div>}
+            {error && <div className="mt-3 rounded-lg border border-red-300/15 bg-red-300/5 p-3 text-xs leading-5 text-red-200">{error}</div>}
           </div>
-          <div className="mt-8 flex items-center justify-between border-t border-white/5 pt-4 text-[10px] uppercase tracking-[.14em] text-slate-700"><span>OIDC / API key</span><span>RBAC aware</span><span>HttpOnly session</span></div>
+          <div className="mt-8 flex items-center justify-between border-t border-white/5 pt-4 text-[10px] uppercase tracking-[.14em] text-slate-700"><span>{ssoEnabled ? "OIDC PKCE / API key" : "API key / bearer"}</span><span>RBAC aware</span><span>HttpOnly session</span></div>
         </div>
       </motion.div>
     </main>
