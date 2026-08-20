@@ -29,6 +29,14 @@ const crossSite = await fetch(`${baseUrl}/api/session`, {
 assert(crossSite.status === 403, `cross-site session mutation returned ${crossSite.status}`);
 process.stdout.write("ok cross-site session mutation rejected\n");
 
+const revoked = await fetch(`${baseUrl}/api/session`, {
+  headers: { cookie: "__Host-tm_session=revoked_test_token" },
+  cache: "no-store",
+});
+assert(revoked.status === 401, `rejected session returned ${revoked.status}`);
+assert(/Max-Age=0/i.test(revoked.headers.get("set-cookie") ?? ""), "rejected session was not expired client-side");
+process.stdout.write("ok rejected backend session expired\n");
+
 const login = await fetch(`${baseUrl}/api/session`, {
   method: "POST",
   headers: { "content-type": "application/json" },
