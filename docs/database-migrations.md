@@ -1,143 +1,107 @@
 # Versioned database migrations
 
-TractusMind uses Alembic as the only supported PostgreSQL schema-mutation path.
-
-Application requests, background workers, and stores do **not** call `create_all()` or execute
-compatibility `ALTER TABLE` statements. They verify that PostgreSQL is at the application migration
-head and fail fast when it is not.
+TractusMind uses Alembic as the only supported PostgreSQL schema-mutation path. Runtime services do
+not call `create_all()` or silently alter tables; they verify the migration head and fail fast.
 
 ## Current revision chain
 
 ```text
 0001_core_schema
-  -> 0002_user_auth   (head)
+  -> 0002_user_auth
+  -> 0003_oidc_rbac   (head)
 ```
 
-`0001_core_schema` represents the managed schema through V14:
+`0001_core_schema` represents the managed schema through V14: source/file state, ingestion runs,
+conversations/interactions, feedback, quality reviews, and regression cases.
 
-- source state and source-file state
-- ingestion runs
-- conversations and answer interactions
-- feedback
-- quality reviews
-- reviewed regression cases
+`0002_user_auth` adds API-key users and `conversation.owner_user_id`.
 
-`0002_user_auth` adds:
+`0003_oidc_rbac` adds:
 
-- `app_user`
-- API-key identity indexes
-- `conversation.owner_user_id`
-- the owner index and foreign-key constraint
+- `app_user.auth_type`
+- `app_user.role`
+- nullable API-key fields for external identities
+- `oidc_issuer` and `oidc_subject`
+- unique `(oidc_issuer, oidc_subject)` identity index
+
+Existing API-key users are migrated with `auth_type=api_key` and `role=user`.
 
 ## Normal deployment
-
-The recommended deployment command is:
 
 ```bash
 tractusmind-db bootstrap
 ```
 
-`bootstrap` is safe for three known states:
+`bootstrap` handles fresh databases, already-versioned databases, and complete pre-Alembic legacy
+TractusMind schemas. Partial legacy schemas are rejected rather than guessed around existing data.
 
-1. **Fresh database** — runs all migrations to `head`.
-2. **Already versioned database** — runs normal `upgrade head`.
-3. **Complete pre-Alembic TractusMind database** — stamps `0001_core_schema`, then runs the
-   idempotent V15 ownership migration to `head`.
-
-A partial legacy schema is rejected. TractusMind does not guess which missing tables are safe to
-reconstruct around existing production data.
-
-Docker Compose runs the one-shot `migrate` service before API and worker startup.
+Docker Compose runs the one-shot migration service before API and worker startup.
 
 ## Operator commands
 
 ```bash
-# Safely adopt or upgrade the database used by deployments
 tractusmind-db bootstrap
-
-# Normal versioned upgrade
 tractusmind-db upgrade
-
-# Upgrade to a specific revision
-tractusmind-db upgrade 0002_user_auth
-
-# Verify that the database matches the application head
+tractusmind-db upgrade 0003_oidc_rbac
 tractusmind-db check
-
-# Fail if ORM metadata differs from the migrated database
 tractusmind-db drift
-
-# Inspect revision state/history
 tractusmind-db current
 tractusmind-db history
-
-# Explicit rollback; take a backup first
-tractusmind-db downgrade 0001_core_schema
 ```
 
-`drift` wraps Alembic's schema comparison. It catches the case where an ORM model changes but the
-corresponding numbered migration was forgotten.
-
-`stamp` is exposed for recovery/operator use, but normal deployment should prefer `bootstrap`:
+Take a backup before explicit rollback:
 
 ```bash
-tractusmind-db stamp 0001_core_schema
+tractusmind-db downgrade 0002_user_auth
 ```
 
-Stamping records migration state without executing DDL. Do not stamp an unverified partial schema.
+Downgrading `0003_oidc_rbac` is deliberately blocked when OIDC identities exist. Converting those
+rows back into mandatory API-key users would require inventing credentials or deleting identity
+records, so the migration fails instead of causing silent data loss.
+
+`drift` wraps Alembic schema comparison and catches ORM changes that were made without a numbered
+migration.
 
 ## Runtime policy
 
-The API checks the database revision during FastAPI startup. Background ingestion checks the same
-revision before source-state work begins. Auth, conversation, and quality stores also keep a
-one-time per-process revision guard before their first database operation.
+The API verifies the database revision at startup. Background ingestion and state stores verify the
+same application head before database work. A stale or missing revision fails with an instruction
+to run `tractusmind-db bootstrap`.
 
-If the revision is missing or stale, runtime fails with an instruction to run:
-
-```text
-tractusmind-db bootstrap
-```
-
-This avoids a dangerous state where one application replica silently mutates shared schema while
-another replica is still serving traffic.
+This prevents one replica from mutating shared schema while another serves traffic on a different
+contract.
 
 ## Legacy adoption safety
 
-The bootstrap baseline requires all V14 core tables to exist before it will stamp an unversioned
-legacy database. V15's `0002_user_auth` migration is intentionally idempotent so databases that
-already created `app_user` or `owner_user_id` before Alembic adoption can still be normalized. It
-adds missing indexes/constraints instead of recreating existing objects.
+The bootstrap baseline requires all managed core tables before it stamps an unversioned legacy
+database. `0002_user_auth` remains idempotent for the historical pre-Alembic user/owner transition;
+normal subsequent revisions use standard ordered migration semantics.
 
-The ownership foreign key uses `ON DELETE RESTRICT`; deleting an identity cannot silently convert
-owned conversation history into anonymous history.
+The conversation ownership foreign key uses `ON DELETE RESTRICT`, so deleting an identity cannot
+silently turn owned history into anonymous history.
 
 ## CI contract
 
-CI starts a real PostgreSQL 17 service and validates:
+CI uses PostgreSQL and validates:
 
 ```text
 fresh bootstrap
   -> revision check
   -> ORM/Alembic drift check
   -> pytest
-  -> remove alembic_version only
-  -> legacy bootstrap adoption
-  -> revision check
-  -> downgrade to 0001_core_schema
+  -> legacy-version-marker adoption smoke test
+  -> downgrade through auth revisions when no external identities exist
   -> upgrade to head
   -> revision check
   -> ORM/Alembic drift check
 ```
 
-The legacy smoke test intentionally keeps all managed tables while removing only Alembic's version
-marker. This reproduces the transition from the pre-V16 TractusMind database.
-
 ## Migration rules
 
 - Never edit a migration revision after it has been used by a shared environment.
-- Add a new numbered revision for every schema change.
-- Keep data migrations explicit and bounded; do not hide them in application startup.
+- Add a numbered revision for every schema change.
+- Keep data migrations explicit and bounded.
 - Back up production PostgreSQL before destructive downgrades.
-- Prefer additive, backward-compatible migrations when rolling multiple replicas.
-- Do not make Qdrant schema/index migration depend implicitly on PostgreSQL Alembic state; track
-  those storage changes separately.
+- Prefer additive/backward-compatible migrations during rolling deployment.
+- Do not hide schema mutation in API startup or request handlers.
+- Track Qdrant index/schema evolution separately from PostgreSQL Alembic state.
