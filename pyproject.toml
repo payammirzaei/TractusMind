@@ -17,6 +17,7 @@ dependencies = [
   "pydantic-settings>=2.6,<3.0",
   "qdrant-client[fastembed]>=1.18,<2.0",
   "sqlalchemy[asyncio]>=2.0,<3.0",
+  "alembic>=1.14,<2.0",
   "asyncpg>=0.29,<1.0",
   "redis>=5.2,<7.0",
   "dramatiq[redis,prometheus]>=1.17,<3.0",
@@ -36,6 +37,7 @@ tractusmind-ingest = "app.ingestion.cli:main"
 tractusmind-benchmark = "app.evaluation.cli:main"
 tractusmind-answer-eval = "app.evaluation.answer_cli:main"
 tractusmind-quality-gate = "app.evaluation.quality_gate:main"
+tractusmind-db = "app.db.cli:main"
 tractusmind-scheduler = "app.workers.scheduler:main"
 
 [project.optional-dependencies]
