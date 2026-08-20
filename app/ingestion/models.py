@@ -54,6 +54,7 @@ class RawDocument(BaseModel):
     source_id: str
     repository: str
     component: str
+    version_ref: str = "main"
     commit_sha: str
     path: str
     blob_sha: str
