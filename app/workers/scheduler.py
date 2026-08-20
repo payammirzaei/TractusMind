@@ -7,6 +7,7 @@ import structlog
 from app.core.config import get_settings
 from app.ingestion.models import SourceDefinition
 from app.ingestion.registry import get_enabled_sources
+from app.observability.metrics import QUEUE_ENQUEUED
 from app.workers.tasks import sync_source_task
 
 logger = structlog.get_logger()
@@ -16,6 +17,7 @@ def enqueue_sources(sources: Sequence[SourceDefinition]) -> list[str]:
     source_ids: list[str] = []
     for source in sources:
         sync_source_task.send(source.id)
+        QUEUE_ENQUEUED.labels(origin="scheduler").inc()
         source_ids.append(source.id)
     return source_ids
 
