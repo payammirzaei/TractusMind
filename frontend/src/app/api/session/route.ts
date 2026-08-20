@@ -1,7 +1,12 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-const COOKIE = "tm_session";
+import {
+  SESSION_COOKIE_NAME,
+  SESSION_COOKIE_OPTIONS,
+  SESSION_MAX_AGE_SECONDS,
+} from "@/lib/server-session";
+
 const API_URL = (process.env.TRACTUSMIND_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
 const UPSTREAM_TIMEOUT_MS = 15_000;
 
@@ -28,7 +33,7 @@ async function identityFor(token: string) {
 
 export async function GET() {
   const store = await cookies();
-  const token = store.get(COOKIE)?.value;
+  const token = store.get(SESSION_COOKIE_NAME)?.value;
   if (!token) {
     return noStore(NextResponse.json({ detail: "Not authenticated" }, { status: 401 }));
   }
@@ -49,7 +54,9 @@ export async function GET() {
 
 export async function POST(request: Request) {
   if (!trustedBrowserMutation(request)) {
-    return noStore(NextResponse.json({ detail: "Cross-site session mutation rejected" }, { status: 403 }));
+    return noStore(
+      NextResponse.json({ detail: "Cross-site session mutation rejected" }, { status: 403 }),
+    );
   }
 
   let payload: unknown;
@@ -60,7 +67,10 @@ export async function POST(request: Request) {
   }
 
   const token =
-    typeof payload === "object" && payload !== null && "token" in payload && typeof payload.token === "string"
+    typeof payload === "object" &&
+    payload !== null &&
+    "token" in payload &&
+    typeof payload.token === "string"
       ? payload.token.trim()
       : "";
   if (!token || token.length > 8192) {
@@ -87,12 +97,9 @@ export async function POST(request: Request) {
         headers: { "content-type": "application/json" },
       }),
     );
-    response.cookies.set(COOKIE, token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
-      maxAge: 60 * 60 * 8,
+    response.cookies.set(SESSION_COOKIE_NAME, token, {
+      ...SESSION_COOKIE_OPTIONS,
+      maxAge: SESSION_MAX_AGE_SECONDS,
     });
     return response;
   } catch {
@@ -102,15 +109,14 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   if (!trustedBrowserMutation(request)) {
-    return noStore(NextResponse.json({ detail: "Cross-site session mutation rejected" }, { status: 403 }));
+    return noStore(
+      NextResponse.json({ detail: "Cross-site session mutation rejected" }, { status: 403 }),
+    );
   }
 
   const response = noStore(NextResponse.json({ ok: true }));
-  response.cookies.set(COOKIE, "", {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
+  response.cookies.set(SESSION_COOKIE_NAME, "", {
+    ...SESSION_COOKIE_OPTIONS,
     maxAge: 0,
   });
   return response;
