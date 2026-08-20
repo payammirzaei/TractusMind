@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Self
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -108,23 +109,19 @@ class Settings(BaseSettings):
     rerank_top_k: int = Field(default=6, ge=1, le=50)
     minimum_relevance_score: float | None = Field(default=None, ge=-100.0, le=100.0)
 
-    @model_validator(mode="before")
-    @classmethod
-    def load_secret_files(cls, values: object) -> object:
-        if not isinstance(values, dict):
-            return values
-        resolved = dict(values)
+    @model_validator(mode="after")
+    def load_secret_files(self) -> Self:
         for target, file_field in _SECRET_FILE_FIELDS.items():
-            current = resolved.get(target)
-            secret_file = resolved.get(file_field)
-            if current not in (None, "") or secret_file in (None, ""):
+            secret_file = getattr(self, file_field)
+            if not secret_file:
                 continue
-            path = Path(str(secret_file))
+            path = Path(secret_file)
             try:
-                resolved[target] = path.read_text(encoding="utf-8").strip()
+                value = path.read_text(encoding="utf-8").strip()
             except OSError as exc:
                 raise ValueError(f"Unable to read secret file for {target}: {path}") from exc
-        return resolved
+            object.__setattr__(self, target, value)
+        return self
 
     @property
     def sqlalchemy_database_url(self) -> str:
