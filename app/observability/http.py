@@ -3,6 +3,7 @@ from uuid import uuid4
 
 import structlog
 from fastapi import Request, Response
+from opentelemetry import trace
 
 from app.observability.metrics import HTTP_REQUEST_DURATION, HTTP_REQUESTS
 
@@ -12,7 +13,11 @@ async def observe_http_request(request: Request, call_next) -> Response:
         return await call_next(request)
 
     request_id = request.headers.get("X-Request-ID") or str(uuid4())
-    structlog.contextvars.bind_contextvars(request_id=request_id)
+    log_context = {"request_id": request_id}
+    span_context = trace.get_current_span().get_span_context()
+    if span_context.is_valid:
+        log_context["trace_id"] = f"{span_context.trace_id:032x}"
+    structlog.contextvars.bind_contextvars(**log_context)
     started = perf_counter()
     status_code = 500
 
