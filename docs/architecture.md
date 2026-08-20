@@ -2,7 +2,7 @@
 
 TractusMind is designed as a source-grounded engineering copilot rather than a generic chatbot.
 The production-shaped deployment separates request serving, scheduled ingestion, ingestion work,
-retrieval storage, application state, job orchestration, metrics, and traces.
+retrieval storage, application state, job orchestration, metrics, traces, and interaction history.
 
 ```text
 Public Internet
@@ -17,11 +17,11 @@ Public Internet
       |                    |             |             |            |
       v                    v             v             v            v
  Scheduler -> Redis -> Ingestion Worker  Qdrant     PostgreSQL    Redis
-    |                    |                  |
-    |                    |             Dense + Sparse
-    |                    |               Retrieval
-    |                    v
-    |             Incremental Sync
+    |                    |                  |           |
+    |                    |             Dense + Sparse  +-- source/file state
+    |                    |               Retrieval     +-- ingestion runs
+    |                    v                             +-- answer interactions
+    |             Incremental Sync                    +-- feedback
     |                    |
     +--------- metrics --+---------> Prometheus
               API metrics ---------> Prometheus
@@ -30,13 +30,14 @@ Public Internet
 
 ## Responsibilities
 
-- **FastAPI**: grounded query API, health endpoints, protected operations API, request correlation,
-  Prometheus API metrics, and optional OpenTelemetry tracing.
+- **FastAPI**: grounded query API, feedback API, health endpoints, protected operations API,
+  request correlation, Prometheus API metrics, and optional OpenTelemetry tracing.
 - **Scheduler**: periodically enqueue all enabled source IDs; it never performs ingestion work.
 - **Worker**: source locks, crawling, parsing, code-aware chunking, embeddings, incremental indexing,
   and worker/model metrics.
 - **Qdrant**: dense/sparse vectors, exact debug payload indexes, snapshot metadata, and chunks.
-- **PostgreSQL**: source/file state, ingestion runs, evaluations, conversations, and feedback.
+- **PostgreSQL**: source/file state, ingestion runs, evaluations, conversations, answer traces,
+  citations/verification snapshots, and feedback.
 - **Redis**: Dramatiq queue, distributed per-source ingestion locks, and short-lived cache.
 - **Prometheus**: API, RAG-stage, local-model, ingestion, scheduler, and native Dramatiq metrics.
 - **OpenTelemetry**: optional API/request and RAG-stage traces exported over OTLP/HTTP.
@@ -83,6 +84,8 @@ question
   -> citation validation
   -> claim verification
   -> final answer or abstention
+  -> persist interaction + citations + verification + timing trace
+  -> optional up/down feedback
 ```
 
 The router currently recognizes SDK, EDC, DTR, semantic-model, release/version, debugging, and
@@ -93,6 +96,27 @@ Semantic release versions such as `24.05` are extracted and preserved in the rou
 used as a hard payload filter because a release repository can document several releases at the
 same indexed ref. Explicit `ref:` and `commit:` constraints are hard filters and fail closed when
 that indexed provenance is unavailable.
+
+## Conversation and trace persistence
+
+`conversation` groups related requests by an opaque UUID. `answer_interaction` stores an immutable
+snapshot of a completed or failed answer request, including route, citations, verification result,
+model, grounded/abstained outcome, request-local stage durations, total duration, and OpenTelemetry
+trace ID when available.
+
+The request-local timing collector is backed by `contextvars`, so concurrent API requests do not
+share stage data. Prometheus remains the aggregate metric system; PostgreSQL stores the trace
+snapshot needed to inspect one specific production answer.
+
+Conversation persistence does not automatically add previous turns to the LLM prompt. History
+selection is a separate retrieval/context-budget decision and will only be enabled with an explicit
+policy.
+
+`answer_feedback` stores one mutable `up` or `down` record per completed interaction. Re-submission
+updates the same record. Public conversation-history reads are intentionally absent until user
+authentication and ownership checks exist; protected ops endpoints can inspect interactions.
+
+See [`conversation-feedback.md`](conversation-feedback.md).
 
 ## Observability contract
 
@@ -160,7 +184,8 @@ The retrieval pipeline evolves deliberately:
 6. Debugging-specific exact-search lane
 7. Incremental source state + scheduled background synchronization
 8. Production observability and measured quality calibration
-9. Code-aware and graph-enhanced retrieval only when benchmark results justify it
+9. Persisted conversations, answer traces, and user feedback
+10. Code-aware and graph-enhanced retrieval only when benchmark results justify it
 
-Every answer should remain traceable to repository/file/version/snapshot/content commit/chunk and
-retrieval evidence.
+Every answer should remain traceable to repository/file/version/snapshot/content commit/chunk,
+retrieval evidence, verification result, persisted interaction, and optional feedback.
