@@ -21,6 +21,7 @@ inspectability, and measurable evaluation come before UI work.
 - PostgreSQL incremental-ingestion state
 - Redis + Dramatiq background source synchronization
 - Prometheus metrics + optional OpenTelemetry traces
+- Grafana dashboards + Prometheus alert rules + Alertmanager
 - persisted answer traces and feedback
 - human-reviewed production regression loop
 - production quality-gate workflow
@@ -43,7 +44,9 @@ Local services:
 API          http://localhost:8000
 OpenAPI      http://localhost:8000/docs
 Metrics      http://localhost:8000/metrics
+Grafana      http://localhost:3000
 Prometheus   http://localhost:9090
+Alertmanager http://localhost:9093
 Qdrant       http://localhost:6333/dashboard
 ```
 
@@ -90,8 +93,6 @@ See [`docs/database-migrations.md`](docs/database-migrations.md).
 Official Tractus-X sources are allowlisted in `config/sources.toml`. Repository refs are resolved
 to immutable Git commit SHAs before content is fetched.
 
-Useful commands:
-
 ```bash
 tractusmind-ingest discover tractusx-sdk
 tractusmind-ingest fetch tractusx-sdk --limit 3
@@ -100,17 +101,9 @@ tractusmind-ingest index tractusx-sdk --limit 10
 tractusmind-ingest sync tractusx-sdk
 ```
 
-Incremental sync compares Git blob SHAs and classifies files as:
-
-```text
-added
-modified
-deleted
-unchanged
-```
-
-Only added and modified files are downloaded, chunked, embedded, and upserted. Unchanged files
-receive metadata-only snapshot updates; deleted paths are removed.
+Incremental sync compares Git blob SHAs and classifies files as `added`, `modified`, `deleted`, or
+`unchanged`. Only changed files are fetched/chunked/embedded; unchanged files receive metadata-only
+snapshot updates.
 
 Snapshot provenance distinguishes:
 
@@ -144,7 +137,7 @@ SOURCE_SYNC_INTERVAL_SECONDS=21600
 SOURCE_SYNC_LOCK_SECONDS=43200
 ```
 
-Manual queue controls:
+Manual controls:
 
 ```bash
 tractusmind-ingest enqueue tractusx-sdk
@@ -171,18 +164,9 @@ question
   -> final evidence
 ```
 
-Debug queries add an exact lane:
-
-```text
-error / exception / symbol / config / path
-  -> exact phrase/symbol/parent/path lookup
-  -> normal hybrid retrieval
-  -> weighted RRF
-  -> cross-encoder reranking
-```
-
-Every retrieval hit can preserve source/repository/version/snapshot/content-commit/path/line
-provenance plus retrieval, rerank, debug, and retrieval-method scores.
+Debug queries add an exact phrase/symbol/parent/path lane before weighted fusion and reranking.
+Every hit preserves source/version/snapshot/content-commit/path/line provenance plus retrieval and
+rerank diagnostics.
 
 ## Grounded answer generation
 
@@ -208,8 +192,7 @@ question
   -> grounded answer or abstention
 ```
 
-Evidence IDs such as `[S1]` are owned by the backend. The model cannot invent repository URLs,
-source IDs, refs, commits, paths, or line numbers. Unsupported claims fail closed.
+Evidence IDs such as `[S1]` are owned by the backend. Unsupported claims fail closed.
 
 ## Provider resilience
 
@@ -229,42 +212,22 @@ PROVIDER_CIRCUIT_FAILURE_THRESHOLD=3
 PROVIDER_CIRCUIT_COOLDOWN_SECONDS=30
 ```
 
-LLM retries transport failures/timeouts and `408/429/500/502/503/504`. GitHub retries transport
-failures, `429/5xx`, and only those `403` responses identifiable as rate limiting.
-
-One `Idempotency-Key` is generated per logical LLM call and reused across all retries. Compatible
-providers can therefore deduplicate ambiguous timeout retries; arbitrary OpenAI-compatible
-providers that ignore the header cannot be guaranteed to deduplicate them.
-
-Circuit breakers are shared within each process. After repeated logical transient failures they
-open and reject new calls until cooldown, then allow one half-open probe. This prevents a failing
-provider from causing a local retry storm.
+One `Idempotency-Key` is reused across retries of the same logical LLM call. Circuit breakers are
+shared within each process and use a single half-open probe after cooldown.
 
 See [`docs/provider-resilience.md`](docs/provider-resilience.md).
 
 ## Authenticated user-owned conversations
 
 Anonymous `/v1/ask` remains supported, but anonymous history is never loaded into generation.
-
-Admins create users under `/v1/ops/users`. The plaintext opaque API key is returned only when it
-is created or rotated; PostgreSQL stores its SHA-256 digest and short prefix.
-
-Clients send:
+Admins create users under `/v1/ops/users`; plaintext opaque API keys are returned only when created
+or rotated, while PostgreSQL stores only their SHA-256 digest and short prefix.
 
 ```http
 Authorization: Bearer tm_...
 ```
 
-Authenticated conversations have `owner_user_id`. Cross-user conversation access deliberately
-returns `404` so existence is not leaked. Existing anonymous conversations are not auto-claimed.
-
-Owned history reads:
-
-```text
-GET /v1/conversations
-GET /v1/conversations/{conversation_id}
-```
-
+Authenticated conversations have `owner_user_id`. Cross-user access deliberately returns `404`.
 History is bounded by:
 
 ```bash
@@ -272,8 +235,7 @@ HISTORY_MAX_TURNS=6
 HISTORY_MAX_CHARS=6000
 ```
 
-History is context, **not source evidence**. Previous assistant answers cannot be cited. Current
-claims are still verified only against current source evidence.
+History is context, **not source evidence**. Previous assistant answers cannot be cited.
 
 See [`docs/authenticated-conversations.md`](docs/authenticated-conversations.md) and
 [`docs/conversation-feedback.md`](docs/conversation-feedback.md).
@@ -295,8 +257,8 @@ user down-vote -------+          ↓
                                       CI/eval gate
 ```
 
-Raw feedback never becomes a gold benchmark automatically. Reviewed regression files live under
-`benchmarks/regressions/` and remain human-approved artifacts.
+Raw feedback never becomes a gold benchmark automatically. Reviewed regression files remain
+human-approved artifacts under `benchmarks/regressions/`.
 
 See [`docs/quality-loop.md`](docs/quality-loop.md).
 
@@ -312,7 +274,7 @@ tractusmind-quality-gate \
   --require-pinned-threshold
 ```
 
-Hard invariants currently require zero unsafe answer/evidence acceptance and 100% pass for reviewed
+Hard invariants require zero unsafe answer/evidence acceptance and 100% pass for reviewed
 retrieval, debug, and answer regressions. Aggregate seed MRR/NDCG/recall remain report-only until a
 measured full-corpus baseline is pinned.
 
@@ -321,41 +283,50 @@ See [`docs/quality-gate.md`](docs/quality-gate.md).
 ## Operations API
 
 Configure `OPS_ADMIN_KEY` and send it as `X-TractusMind-Admin-Key`.
-
 Protected operations cover source/run state, interactions, users, quality reviews/regressions, and
 manual source-sync enqueue controls.
 
 See [`docs/operations.md`](docs/operations.md).
 
-## Observability
+## Grafana, Prometheus, and alerting
 
-Local Compose includes Prometheus. Main scrape surfaces:
-
-```text
-api:8000/metrics
-worker:9101/metrics
-worker:9191/
-scheduler:9102/metrics
-```
-
-TractusMind records HTTP and pipeline latency, model warm-up, ingestion state, queue/lock state,
-answer outcomes, provider retries/delays, and provider circuit events. Every normal API response
-receives `X-Request-ID` for log correlation.
-
-Provider metric families include:
+V18 provisions three Grafana dashboards under the `TractusMind` folder:
 
 ```text
-tractusmind_provider_requests_total
-tractusmind_provider_retries_total
-tractusmind_provider_retry_delay_seconds
-tractusmind_provider_circuit_open_total
+TractusMind — API & RAG Overview
+TractusMind — Providers & Ingestion
+TractusMind — Quality Loop
 ```
 
-See [`docs/observability.md`](docs/observability.md).
+Prometheus loads repository-owned alert rules for target availability, API 5xx/latency, provider
+retry/circuit pressure, RAG pipeline errors, negative-feedback/failure-review spikes, ingestion
+failures, worker failures, and lock contention.
+
+Alertmanager groups and routes alerts. Its repository default receiver intentionally has no external
+Slack/email/PagerDuty/webhook credentials; deployments add those through their secret-management
+system.
+
+New quality-loop metric families include:
+
+```text
+tractusmind_quality_review_signals_total
+tractusmind_quality_review_decisions_total
+tractusmind_quality_regression_promotions_total
+```
+
+Exact pending-review backlog remains a PostgreSQL/ops-API state, not a fake Prometheus gauge.
+Likewise, `tractusmind_queue_enqueued_total` is an enqueue counter and is not presented as queue
+depth.
+
+CI validates Prometheus config/rules with `promtool`, Alertmanager with `amtool`, all Grafana JSON,
+and the full Compose configuration.
+
+See [`docs/observability.md`](docs/observability.md) and
+[`docs/grafana-alerting.md`](docs/grafana-alerting.md).
 
 ## Inspectability principle
 
-No hidden RAG magic. A production answer should remain inspectable as:
+No hidden RAG magic. A production answer remains inspectable as:
 
 ```text
 identity / anonymous
@@ -380,7 +351,7 @@ See [`docs/architecture.md`](docs/architecture.md).
 
 ## Current milestone
 
-**V17 — Provider Resilience**
+**V18 — Production Grafana + Alerting**
 
 Completed:
 
@@ -389,24 +360,25 @@ Completed:
 - [x] citation and atomic claim verification
 - [x] incremental PostgreSQL/Qdrant source synchronization
 - [x] background scheduler/worker + distributed locks
-- [x] operations API and production observability
 - [x] persisted conversations, feedback, and human-reviewed quality loop
 - [x] production quality-gate CLI/workflow
 - [x] opaque bearer users and owned bounded conversation history
 - [x] Alembic versioned schema + legacy bootstrap + ORM drift gate
-- [x] bounded LLM/GitHub transient retry with exponential backoff and jitter
-- [x] Retry-After and GitHub rate-limit-aware delay handling
-- [x] process-shared provider circuit breakers with half-open probe
-- [x] stable LLM Idempotency-Key across retries
-- [x] provider retry/circuit Prometheus metrics
-- [x] provider resilience regression tests using deterministic HTTP transports
+- [x] bounded LLM/GitHub retries, Retry-After handling, and circuit breakers
+- [x] Prometheus + optional OpenTelemetry observability
+- [x] provisioned Grafana API/RAG, provider/ingestion, and quality dashboards
+- [x] Prometheus production-shaped alert rules
+- [x] Alertmanager grouping/routing baseline
+- [x] quality-loop Prometheus event metrics
+- [x] CI validation for Prometheus, Alertmanager, Grafana JSON, and Compose
 
 Still measured/production-dependent:
 
 - [ ] run full-corpus debug benchmark and tune fusion weights
 - [ ] run live full-corpus abstention calibration and pin the measured threshold
 - [ ] promote reviewed real production cases into committed regression files
-- [ ] add production Grafana dashboards/alerts after measured traffic exists
+- [ ] connect the deployment's real Alertmanager notification receiver and secrets
+- [ ] tune alert thresholds after measured production traffic exists
 - [ ] add OIDC/JWKS adapter if external enterprise SSO is required
 
 ## License
