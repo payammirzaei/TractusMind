@@ -17,8 +17,15 @@ services:
 
   worker:
     build: .
-    command: dramatiq app.workers.tasks --processes 1 --threads 1
+    command: >-
+      sh -c 'mkdir -p /tmp/dramatiq-prometheus &&
+      rm -f /tmp/dramatiq-prometheus/* &&
+      exec dramatiq app.workers.tasks --processes 1 --threads 1'
     env_file: .env
+    environment:
+      PROMETHEUS_MULTIPROC_DIR: /tmp/dramatiq-prometheus
+      prometheus_multiproc_dir: /tmp/dramatiq-prometheus
+      dramatiq_prom_db: /tmp/dramatiq-prometheus
     volumes:
       - ./app:/app/app
       - ./config:/app/config:ro
