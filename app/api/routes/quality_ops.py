@@ -6,7 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 
-from app.api.ops_auth import require_ops_admin
+from app.api.ops_auth import require_ops_admin, require_ops_operator
 from app.observability.metrics import (
     QUALITY_REGRESSION_PROMOTIONS,
     QUALITY_REVIEW_DECISIONS,
@@ -16,7 +16,7 @@ from app.quality.store import RegressionRecord, ReviewRecord, ReviewStateError
 router = APIRouter(
     prefix="/v1/ops/quality",
     tags=["quality"],
-    dependencies=[Depends(require_ops_admin)],
+    dependencies=[Depends(require_ops_operator)],
 )
 
 RootCause = Literal[
@@ -137,7 +137,10 @@ async def review(review_id: UUID, request: Request) -> ReviewResponse:
     return _review(record)
 
 
-@router.post("/reviews/{review_id}/decision")
+@router.post(
+    "/reviews/{review_id}/decision",
+    dependencies=[Depends(require_ops_admin)],
+)
 async def decide_review(
     review_id: UUID,
     payload: ReviewDecision,
