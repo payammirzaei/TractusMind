@@ -19,8 +19,9 @@ inspectability, and measurable evaluation come before UI work.
 - OpenAI-compatible grounded generation
 - Claim-level answer verification
 - PostgreSQL source/file state + ingestion-run history
+- PostgreSQL conversation, answer-trace, citation, verification, and feedback persistence
 - Redis + Dramatiq background ingestion
-- Protected ingestion operations API
+- Protected ingestion and interaction operations API
 - Prometheus metrics + optional OpenTelemetry traces
 - Tree-sitter structure-aware code chunking
 - Docker / Docker Compose
@@ -190,11 +191,17 @@ GET /v1/ops/sources
 GET /v1/ops/sources/{source_id}
 GET /v1/ops/runs
 GET /v1/ops/runs/{run_id}
+GET /v1/ops/interactions
+GET /v1/ops/feedback/summary
 ```
 
 The source view merges the static registry with PostgreSQL and Redis state. It exposes current
 snapshot provenance, indexed-file count, lock state, last successful run, and the latest run even
 when that latest run failed or is still running.
+
+The interaction view exposes persisted question/answer state, route, citations, verification,
+request-local stage durations, OpenTelemetry trace ID when available, and feedback. It is kept
+behind the admin key because public conversation-history ownership does not exist yet.
 
 Manual triggers enqueue work instead of running ingestion inside the HTTP request:
 
@@ -369,6 +376,58 @@ The backend owns evidence IDs such as `[S1]`. The model is not trusted to invent
 source IDs, refs, commits, paths, or line numbers. Structured citation IDs must match inline
 citations, and unsupported claims fail closed.
 
+## Conversation, trace, and feedback persistence
+
+Completed and failed answer requests are persisted in PostgreSQL. A persisted completed response
+returns two opaque UUIDs:
+
+```json
+{
+  "interaction_id": "...",
+  "conversation_id": "..."
+}
+```
+
+The next request can reuse `conversation_id` to keep related turns grouped:
+
+```json
+{
+  "question": "What about contract negotiation?",
+  "conversation_id": "..."
+}
+```
+
+Conversation grouping does **not** automatically add previous turns to the generation prompt.
+History selection and token budgeting remain a separate future policy.
+
+Each `answer_interaction` stores the final answer outcome plus route, citations, verification,
+model, evidence count, total duration, OpenTelemetry trace ID when active, and request-local stage
+durations. The same request-local collector also records dense/sparse/reranker operation timing
+when those operations are instrumented.
+
+Clients can submit or update one feedback record per completed interaction:
+
+```http
+POST /v1/feedback
+Content-Type: application/json
+
+{
+  "interaction_id": "...",
+  "rating": "down",
+  "reason": "citation",
+  "comment": "The cited evidence does not support the exact claim."
+}
+```
+
+Feedback accepts `up` or `down`. Unknown or failed interactions are rejected. Re-submission updates
+the existing feedback instead of creating duplicate contradictory votes.
+
+Persistence is best-effort: a valid generated answer is not converted into an HTTP failure merely
+because its analytics write failed. Failed generation/runtime requests are also persisted on a
+best-effort basis with safe error type and captured timing data.
+
+See [`docs/conversation-feedback.md`](docs/conversation-feedback.md).
+
 ## Evaluation
 
 General retrieval benchmark:
@@ -422,13 +481,15 @@ question
   -> atomic claims
   -> claim/evidence verdicts
   -> answer or abstention
+  -> persisted interaction + timings + trace ID
+  -> optional user feedback
 ```
 
 See [`docs/architecture.md`](docs/architecture.md).
 
 ## Current milestone
 
-**V11 — Prometheus + OpenTelemetry Observability**
+**V12 — Conversation + Feedback + Trace Persistence**
 
 - [x] source-grounded FastAPI query service
 - [x] allowlisted Tractus-X source registry
@@ -456,8 +517,16 @@ See [`docs/architecture.md`](docs/architecture.md).
 - [x] optional OTLP/HTTP OpenTelemetry traces
 - [x] retrieval/generation/verification trace spans
 - [x] local Prometheus Compose service and scrape configuration
+- [x] persisted conversations and completed/failed interactions
+- [x] persisted route/citation/verification snapshots
+- [x] request-local pipeline and model-operation timing persistence
+- [x] OpenTelemetry trace-ID correlation in interaction records
+- [x] up/down feedback endpoint with one mutable vote per interaction
+- [x] protected interaction and feedback inspection endpoints
 - [ ] run full-corpus debug benchmark and tune fusion weights
 - [ ] run full-corpus abstention calibration and persist the measured threshold
+- [ ] promote reviewed production failures/down-votes into regression benchmark cases
+- [ ] add authenticated user-owned conversation history before history enters prompts
 - [ ] add production Grafana dashboards/alerts after measured traffic exists
 
 ## License
