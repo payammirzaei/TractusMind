@@ -12,6 +12,7 @@ from app.routing.models import QueryRoute
 _QUOTED_RE = re.compile(r'["`]([^"`\n]{3,180})["`]')
 _PATH_RE = re.compile(r"(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+")
 _EXCEPTION_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_.]*(?:Exception|Error)\b")
+_CAMEL_RE = re.compile(r"\b[A-Z][a-zA-Z0-9]*(?:[A-Z][a-zA-Z0-9]*)+\b")
 _SNAKE_RE = re.compile(r"\b[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+\b")
 _DOTTED_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]+)+\b")
 _ENV_RE = re.compile(r"\b[A-Z][A-Z0-9_]{2,}\b")
@@ -48,7 +49,13 @@ def extract_debug_terms(query: str) -> DebugQueryTerms:
         if 6 <= len(line) <= 180 and _ERROR_LINE_RE.search(line):
             _append_unique(phrases, line, limit=6)
 
-    for pattern in (_EXCEPTION_RE, _SNAKE_RE, _DOTTED_RE, _ENV_RE):
+    for pattern in (
+        _EXCEPTION_RE,
+        _CAMEL_RE,
+        _SNAKE_RE,
+        _DOTTED_RE,
+        _ENV_RE,
+    ):
         for match in pattern.finditer(query):
             _append_unique(identifiers, match.group(0), limit=12)
 
