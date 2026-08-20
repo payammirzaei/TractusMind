@@ -13,7 +13,7 @@ The project intentionally starts with retrieval quality and evaluation before UI
 - Qdrant for dense + sparse retrieval
 - PostgreSQL for application and ingestion state
 - Redis + Dramatiq for background ingestion jobs
-- Tree-sitter/code-aware ingestion (next milestone)
+- Tree-sitter for AST-aware source-code chunking
 - Cross-encoder reranking (next retrieval milestone)
 - Docker / Docker Compose
 - GitHub Actions
@@ -42,7 +42,7 @@ pytest -q
 ruff check .
 ```
 
-## Source discovery and content fetching
+## Source discovery, fetching, and chunking
 
 Official Tractus-X sources are allowlisted in `config/sources.toml`. Discovery resolves every repository ref to an immutable commit SHA before any content is fetched.
 
@@ -53,11 +53,23 @@ tractusmind-ingest discover tractusx-sdk
 # Fetch three selected files from that exact commit and inspect their metadata
 tractusmind-ingest fetch tractusx-sdk --limit 3
 
+# Fetch and smart-chunk three files, printing only traceability metadata
+tractusmind-ingest chunk tractusx-sdk --limit 3
+
 # Discover all enabled sources with the original inspection script
 python scripts/discover_sources.py
 ```
 
 Fetched files become canonical `RawDocument` objects containing a stable document ID, repository, commit SHA, blob SHA, language/content type, SHA-256 content hash, normalized UTF-8 text, and a source URL pinned to the exact commit.
+
+Smart chunking keeps retrieval units source-traceable:
+
+- Markdown is split by heading hierarchy before size limits are applied.
+- Python, Java, Kotlin, TypeScript, and JavaScript are parsed with Tree-sitter and chunked by class/function/method symbols.
+- Code chunks preserve parent symbols such as `ConnectorService -> create_asset`.
+- YAML is chunked by top-level configuration keys.
+- Turtle/SAMM content is chunked by semantic statements while retaining prefix context.
+- Every chunk carries exact source line ranges and a commit-pinned citation URL.
 
 `GITHUB_TOKEN` is optional for public repositories, but recommended to avoid low unauthenticated API rate limits.
 
@@ -83,7 +95,7 @@ See [`docs/architecture.md`](docs/architecture.md) for the current architecture 
 
 ## Current milestone
 
-**V0 — Foundation / Source Ingestion**
+**V0 — Foundation / Source Ingestion / Smart Chunking**
 
 - [x] FastAPI service shell
 - [x] Qdrant/PostgreSQL/Redis connectivity contract
@@ -97,7 +109,11 @@ See [`docs/architecture.md`](docs/architecture.md) for the current architecture 
 - [x] Commit-pinned content fetching
 - [x] Canonical RawDocument metadata + content hashing
 - [x] Incomplete-tree safety guard
-- [ ] code-aware/document-aware chunking
+- [x] Markdown heading-aware chunking
+- [x] Tree-sitter code symbol chunking
+- [x] YAML/Turtle structure-aware chunking
+- [x] Stable KnowledgeChunk IDs + exact source line ranges
+- [ ] embedding generation + Qdrant indexing
 - [ ] first dense retrieval benchmark
 
 ## License
