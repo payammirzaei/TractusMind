@@ -1,4 +1,4 @@
-name: Release Image
+name: Release Images
 
 on:
   push:
@@ -8,12 +8,26 @@ on:
 permissions:
   contents: read
   packages: write
+  id-token: write
 
 jobs:
-  image:
+  images:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: backend
+            context: .
+            image: ghcr.io/payammirzaei/tractusmind
+          - component: mission-control
+            context: ./frontend
+            image: ghcr.io/payammirzaei/tractusmind-ui
+
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: docker/setup-qemu-action@v3
 
       - uses: docker/setup-buildx-action@v3
 
@@ -28,18 +42,24 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/payammirzaei/tractusmind
+          images: ${{ matrix.image }}
           tags: |
             type=ref,event=tag
             type=sha,prefix=sha-
+          labels: |
+            org.opencontainers.image.title=TractusMind ${{ matrix.component }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
 
-      - name: Build and push
+      - name: Build and push ${{ matrix.component }}
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ${{ matrix.context }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
           provenance: mode=max
           sbom: true
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
