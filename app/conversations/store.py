@@ -240,6 +240,23 @@ class ConversationStore:
 
         return [self._interaction_record(interaction, feedback) for interaction, feedback in rows]
 
+    async def get_interaction(self, interaction_id: str) -> InteractionRecord | None:
+        await self.ensure_schema()
+        statement = (
+            select(AnswerInteraction, AnswerFeedback)
+            .outerjoin(
+                AnswerFeedback,
+                AnswerFeedback.interaction_id == AnswerInteraction.interaction_id,
+            )
+            .where(AnswerInteraction.interaction_id == interaction_id)
+        )
+        async with self.sessions() as session:
+            row = (await session.execute(statement)).first()
+        if row is None:
+            return None
+        interaction, feedback = row
+        return self._interaction_record(interaction, feedback)
+
     async def feedback_counts(self) -> dict[str, int]:
         await self.ensure_schema()
         async with self.sessions() as session:
