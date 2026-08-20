@@ -8,6 +8,7 @@ from app.generation.llm import LLMGenerationError, LLMProvider
 from app.generation.models import GroundedAnswer, LLMAnswerPayload, VerificationReport
 from app.generation.verification import ClaimVerifier
 from app.observability.metrics import ANSWERS, RETRIEVAL_RESULTS, observe_stage
+from app.observability.trace_context import record_trace_metadata
 from app.retrieval.reranked import RerankedRetrievalService
 from app.routing.models import QueryRoute
 from app.routing.service import QueryRouter
@@ -59,6 +60,10 @@ class GroundedAnswerService:
 
         route = self.router.route(normalized)
         intent = route.intent.value
+        record_trace_metadata("route", route.model_dump(mode="json"))
+        record_trace_metadata("intent", intent)
+        record_trace_metadata("model", self.llm.model_name)
+
         with observe_stage("retrieval", intent):
             hits = await self.retrieval.search(
                 normalized,
@@ -76,6 +81,13 @@ class GroundedAnswerService:
             ]
 
         context = build_grounded_context(hits, max_chars=self.context_max_chars)
+        citation_map = context.citations
+        record_trace_metadata("evidence_count", len(context.blocks))
+        record_trace_metadata(
+            "citations",
+            [citation.model_dump(mode="json") for citation in citation_map.values()],
+        )
+
         if not context.blocks:
             ANSWERS.labels(intent=intent, outcome="abstained_no_evidence").inc()
             return self._abstain(normalized, evidence_count=0, route=route)
@@ -101,7 +113,6 @@ class GroundedAnswerService:
                 model=self.llm.model_name,
             )
 
-        citation_map = context.citations
         cited_ids = _CITATION_RE.findall(payload.answer)
         inline_ids = set(cited_ids)
         declared_ids = set(payload.citation_ids)
