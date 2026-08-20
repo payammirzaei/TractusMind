@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
-from app.api.ops_auth import require_ops_admin
+from app.api.ops_auth import require_ops_admin, require_ops_operator
 from app.core.config import get_settings
 from app.ingestion.registry import get_source, load_source_registry
 from app.observability.metrics import QUEUE_ENQUEUED
@@ -14,7 +14,7 @@ from app.workers.tasks import sync_source_task
 router = APIRouter(
     prefix="/v1/ops",
     tags=["operations"],
-    dependencies=[Depends(require_ops_admin)],
+    dependencies=[Depends(require_ops_operator)],
 )
 
 
@@ -205,6 +205,7 @@ async def run(run_id: str, request: Request) -> RunOpsStatus:
     "/sources/{source_id}/sync",
     response_model=EnqueueResult,
     status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_ops_admin)],
 )
 async def enqueue_source(source_id: str) -> EnqueueResult:
     try:
@@ -226,6 +227,7 @@ async def enqueue_source(source_id: str) -> EnqueueResult:
     "/sync",
     response_model=EnqueueManyResult,
     status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_ops_admin)],
 )
 async def enqueue_all() -> EnqueueManyResult:
     jobs = [_enqueue(source.id) for source in load_source_registry() if source.enabled]
