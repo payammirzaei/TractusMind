@@ -97,7 +97,11 @@ class OIDCAuthenticator:
             role=role,
         )
 
-    async def _configuration(self, *, force: bool = False) -> tuple[OIDCMetadata, dict[str, Any]]:
+    async def _configuration(
+        self,
+        *,
+        force: bool = False,
+    ) -> tuple[OIDCMetadata, dict[str, Any]]:
         now = time.monotonic()
         if (
             not force
@@ -117,9 +121,10 @@ class OIDCAuthenticator:
             ):
                 return self._metadata, self._jwks
 
-            configured_issuer = (self.settings.oidc_issuer_url or "").rstrip("/")
+            configured_issuer = self.settings.oidc_issuer_url or ""
             self._validate_provider_url(configured_issuer)
-            discovery_url = f"{configured_issuer}/.well-known/openid-configuration"
+            discovery_base = configured_issuer.rstrip("/")
+            discovery_url = f"{discovery_base}/.well-known/openid-configuration"
             discovery = await self._get_json(discovery_url)
             issuer = discovery.get("issuer")
             jwks_uri = discovery.get("jwks_uri")
