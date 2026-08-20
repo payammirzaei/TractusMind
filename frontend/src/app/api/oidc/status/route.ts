@@ -1,5 +1,8 @@
 import { oidcConfig } from "@/lib/server-oidc";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 export async function GET() {
   const config = oidcConfig();
   return Response.json(
