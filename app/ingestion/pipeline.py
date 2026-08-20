@@ -12,8 +12,22 @@ class SourceIngestionPipeline:
         token: str | None = None,
         timeout: float = 30.0,
         concurrency: int = 8,
+        *,
+        max_attempts: int = 4,
+        retry_base_seconds: float = 0.5,
+        retry_max_seconds: float = 8.0,
+        circuit_failure_threshold: int = 3,
+        circuit_cooldown_seconds: float = 30.0,
     ) -> None:
-        self._client = GitHubApiClient(token=token, timeout=timeout)
+        self._client = GitHubApiClient(
+            token=token,
+            timeout=timeout,
+            max_attempts=max_attempts,
+            retry_base_seconds=retry_base_seconds,
+            retry_max_seconds=retry_max_seconds,
+            circuit_failure_threshold=circuit_failure_threshold,
+            circuit_cooldown_seconds=circuit_cooldown_seconds,
+        )
         self._scanner = GitHubSourceScanner(client=self._client)
         self._fetcher = GitHubContentFetcher(
             client=self._client,
