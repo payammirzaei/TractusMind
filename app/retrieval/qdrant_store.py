@@ -51,6 +51,9 @@ class QdrantKnowledgeStore:
         await self._ensure_payload_indexes()
 
     async def _ensure_payload_indexes(self) -> None:
+        collection = await self.client.get_collection(self.collection_name)
+        existing = set(collection.payload_schema)
+
         for field in (
             "source_id",
             "repository",
@@ -64,6 +67,8 @@ class QdrantKnowledgeStore:
             "symbol",
             "parent_symbol",
         ):
+            if field in existing:
+                continue
             await self.client.create_payload_index(
                 collection_name=self.collection_name,
                 field_name=field,
@@ -71,17 +76,20 @@ class QdrantKnowledgeStore:
                 wait=True,
             )
 
-        await self.client.create_payload_index(
-            collection_name=self.collection_name,
-            field_name="debug_text",
-            field_schema=models.TextIndexParams(
-                type=models.TextIndexType.TEXT,
-                tokenizer=models.TokenizerType.WHITESPACE,
-                lowercase=True,
-                phrase_matching=True,
-            ),
-            wait=True,
-        )
+        if "debug_text" not in existing:
+            await self.client.create_payload_index(
+                collection_name=self.collection_name,
+                field_name="debug_text",
+                field_schema=models.TextIndexParams(
+                    type=models.TextIndexType.TEXT,
+                    tokenizer=models.TokenizerType.WHITESPACE,
+                    min_token_len=1,
+                    max_token_len=256,
+                    lowercase=True,
+                    phrase_matching=True,
+                ),
+                wait=True,
+            )
 
     async def upsert_chunks(
         self,
