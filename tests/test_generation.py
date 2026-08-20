@@ -1,5 +1,6 @@
 from app.generation.context import build_grounded_context
 from app.generation.service import GroundedAnswerService
+from app.generation.verification import ClaimVerifier
 from app.retrieval.models import RetrievalHit
 
 
@@ -37,14 +38,25 @@ class FakeRetrieval:
 class FakeLLM:
     model_name = "test-model"
 
-    def __init__(self, response: str) -> None:
-        self.response = response
+    def __init__(self, *responses: str) -> None:
+        self.responses = list(responses)
 
     async def complete(self, system_prompt: str, user_prompt: str) -> str:
-        return self.response
+        if not self.responses:
+            raise AssertionError("FakeLLM has no response left")
+        return self.responses.pop(0)
 
     async def close(self) -> None:
         return None
+
+
+def _service(hits: list[RetrievalHit], *responses: str) -> GroundedAnswerService:
+    llm = FakeLLM(*responses)
+    return GroundedAnswerService(
+        retrieval=FakeRetrieval(hits),  # type: ignore[arg-type]
+        llm=llm,
+        verifier=ClaimVerifier(llm),
+    )
 
 
 def test_context_assigns_backend_owned_citation_ids() -> None:
@@ -55,11 +67,14 @@ def test_context_assigns_backend_owned_citation_ids() -> None:
     assert context.citations["S1"].start_line == 10
 
 
-async def test_grounded_answer_maps_valid_citations() -> None:
-    service = GroundedAnswerService(
-        retrieval=FakeRetrieval([_hit()]),  # type: ignore[arg-type]
-        llm=FakeLLM(
-            '{"answer":"Use create_asset [S1].","citation_ids":["S1"],"grounded":true}'
+async def test_grounded_answer_passes_claim_verification() -> None:
+    service = _service(
+        [_hit()],
+        '{"answer":"Use create_asset [S1].","citation_ids":["S1"],"grounded":true}',
+        (
+            '{"claims":[{"claim":"The SDK supports create_asset.",'
+            '"citation_ids":["S1"],"supported":true,"reason":"Directly supported."}],'
+            '"all_supported":true}'
         ),
     )
 
@@ -68,15 +83,34 @@ async def test_grounded_answer_maps_valid_citations() -> None:
     assert answer.grounded is True
     assert answer.abstained is False
     assert answer.citations[0].citation_id == "S1"
-    assert answer.citations[0].path == "tractusx_sdk/connector.py"
+    assert answer.verification is not None
+    assert answer.verification.passed is True
+
+
+async def test_answer_abstains_when_claim_is_unsupported() -> None:
+    service = _service(
+        [_hit()],
+        '{"answer":"Assets require OAuth [S1].","citation_ids":["S1"],"grounded":true}',
+        (
+            '{"claims":[{"claim":"Assets require OAuth.",'
+            '"citation_ids":["S1"],"supported":false,"reason":"Evidence does not say this."}],'
+            '"all_supported":false}'
+        ),
+    )
+
+    answer = await service.answer("Question")
+
+    assert answer.grounded is False
+    assert answer.abstained is True
+    assert answer.verification is not None
+    assert answer.verification.passed is False
+    assert answer.verification.unsupported_claim_count == 1
 
 
 async def test_answer_abstains_when_llm_invents_citation() -> None:
-    service = GroundedAnswerService(
-        retrieval=FakeRetrieval([_hit()]),  # type: ignore[arg-type]
-        llm=FakeLLM(
-            '{"answer":"Unsupported claim [S9].","citation_ids":["S9"],"grounded":true}'
-        ),
+    service = _service(
+        [_hit()],
+        '{"answer":"Unsupported claim [S9].","citation_ids":["S9"],"grounded":true}',
     )
 
     answer = await service.answer("Question")
@@ -86,11 +120,26 @@ async def test_answer_abstains_when_llm_invents_citation() -> None:
     assert answer.citations == []
 
 
-async def test_answer_abstains_before_llm_when_no_evidence() -> None:
-    service = GroundedAnswerService(
-        retrieval=FakeRetrieval([]),  # type: ignore[arg-type]
-        llm=FakeLLM("should not be used"),
+async def test_verifier_rejects_claim_citation_not_present_in_answer() -> None:
+    service = _service(
+        [_hit()],
+        '{"answer":"Use create_asset [S1].","citation_ids":["S1"],"grounded":true}',
+        (
+            '{"claims":[{"claim":"Use create_asset.",'
+            '"citation_ids":["S2"],"supported":true,"reason":"Claimed support."}],'
+            '"all_supported":true}'
+        ),
     )
+
+    answer = await service.answer("Question")
+
+    assert answer.abstained is True
+    assert answer.verification is not None
+    assert answer.verification.failure_reason == "claim_citation_validation_failed"
+
+
+async def test_answer_abstains_before_llm_when_no_evidence() -> None:
+    service = _service([], "should not be used")
 
     answer = await service.answer("Question")
 
