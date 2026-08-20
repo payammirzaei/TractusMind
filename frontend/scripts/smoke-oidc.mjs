@@ -19,6 +19,11 @@ function findCookie(cookies, name) {
   return cookies.find((cookie) => cookie.startsWith(`${name}=`));
 }
 
+function cookieValue(cookie) {
+  const raw = cookie.slice(cookie.indexOf("=") + 1);
+  try { return decodeURIComponent(raw); } catch { return raw; }
+}
+
 const status = await fetch(`${baseUrl}/api/oidc/status`, { cache: "no-store" });
 const statusPayload = await status.json();
 assert(status.status === 200 && statusPayload.enabled === true, "OIDC status is not enabled in CI runtime");
@@ -80,7 +85,7 @@ process.stdout.write("ok OIDC state mismatch rejected\n");
 const unsafeReturn = await fetch(`${baseUrl}/api/oidc/login?return_to=https%3A%2F%2Fevil.example`, { redirect: "manual", cache: "no-store" });
 const unsafeCookies = cookiesFrom(unsafeReturn);
 const returnCookie = findCookie(unsafeCookies, "__Host-tm_oidc_return") ?? "";
-assert(returnCookie.endsWith("=/"), `unsafe return target was not normalized: ${returnCookie}`);
+assert(cookieValue(returnCookie) === "/", `unsafe return target was not normalized: ${returnCookie}`);
 process.stdout.write("ok OIDC open-redirect target rejected\n");
 
 process.stdout.write("Mission Control OIDC PKCE smoke passed.\n");
