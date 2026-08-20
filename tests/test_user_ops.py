@@ -71,6 +71,16 @@ def test_admin_creates_user_and_receives_key_once(monkeypatch) -> None:
     assert response.json()["api_key"] == "tm_created"
 
 
+def test_blank_user_name_is_rejected(monkeypatch) -> None:
+    response = TestClient(_app(monkeypatch)).post(
+        "/v1/ops/users",
+        headers=_headers(),
+        json={"display_name": "   "},
+    )
+
+    assert response.status_code == 422
+
+
 def test_admin_rotation_returns_replacement_key(monkeypatch) -> None:
     response = TestClient(_app(monkeypatch)).post(
         f"/v1/ops/users/{_USER_ID}/rotate",
