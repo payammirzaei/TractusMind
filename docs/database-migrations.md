@@ -64,6 +64,9 @@ tractusmind-db upgrade 0002_user_auth
 # Verify that the database matches the application head
 tractusmind-db check
 
+# Fail if ORM metadata differs from the migrated database
+tractusmind-db drift
+
 # Inspect revision state/history
 tractusmind-db current
 tractusmind-db history
@@ -71,6 +74,9 @@ tractusmind-db history
 # Explicit rollback; take a backup first
 tractusmind-db downgrade 0001_core_schema
 ```
+
+`drift` wraps Alembic's schema comparison. It catches the case where an ORM model changes but the
+corresponding numbered migration was forgotten.
 
 `stamp` is exposed for recovery/operator use, but normal deployment should prefer `bootstrap`:
 
@@ -112,6 +118,7 @@ CI starts a real PostgreSQL 17 service and validates:
 ```text
 fresh bootstrap
   -> revision check
+  -> ORM/Alembic drift check
   -> pytest
   -> remove alembic_version only
   -> legacy bootstrap adoption
@@ -119,6 +126,7 @@ fresh bootstrap
   -> downgrade to 0001_core_schema
   -> upgrade to head
   -> revision check
+  -> ORM/Alembic drift check
 ```
 
 The legacy smoke test intentionally keeps all managed tables while removing only Alembic's version
