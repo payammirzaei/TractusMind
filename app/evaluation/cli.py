@@ -12,6 +12,8 @@ from app.retrieval.factory import (
 )
 from app.retrieval.hybrid import HybridRetrievalService
 from app.retrieval.reranked import RerankedRetrievalService
+from app.routing.models import QueryRoute
+from app.routing.service import QueryRouter
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -44,16 +46,26 @@ async def _search_mode(
     mode: str,
     k: int,
     settings: Settings,
+    route: QueryRoute,
 ):
     if mode == "dense":
-        return await retrieval.search_dense(question, limit=k)
+        return await retrieval.search_dense(
+            question,
+            limit=k,
+            route=route,
+        )
     if mode == "hybrid":
         return await retrieval.search_hybrid(
             question,
             limit=k,
             prefetch_limit=settings.hybrid_prefetch_k,
+            route=route,
         )
-    return await reranked.search(question, limit=k)
+    return await reranked.search(
+        question,
+        limit=k,
+        route=route,
+    )
 
 
 async def _run_mode(
@@ -64,9 +76,11 @@ async def _run_mode(
     k: int,
     settings: Settings,
 ):
+    router = QueryRouter()
     evaluations = []
     details = []
     for case in cases:
+        route = router.route(case.question)
         hits = await _search_mode(
             retrieval,
             reranked,
@@ -74,6 +88,7 @@ async def _run_mode(
             mode,
             k,
             settings,
+            route,
         )
         metrics = evaluate_case(case, hits, k)
         evaluations.append(metrics)
@@ -81,6 +96,7 @@ async def _run_mode(
             {
                 "id": case.id,
                 "category": case.category,
+                "route": route.model_dump(mode="json"),
                 "hit": bool(metrics[0]),
                 "first_relevant_rank": next(
                     (
@@ -134,6 +150,7 @@ async def _run(args: argparse.Namespace) -> None:
         json.dumps(
             {
                 "dataset": str(args.dataset),
+                "routing": "deterministic_v1",
                 "dense_model": settings.embedding_model,
                 "sparse_model": settings.sparse_embedding_model,
                 "reranker_model": settings.reranker_model,
