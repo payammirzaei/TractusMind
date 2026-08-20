@@ -1,11 +1,15 @@
 from contextvars import Token
 from time import perf_counter
+from typing import Annotated
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from app.api.user_auth import optional_user
+from app.auth.store import UserIdentity
+from app.conversations.store import ConversationAccessError
 from app.core.config import get_settings
 from app.generation.factory import create_grounded_answer_service
 from app.generation.llm import LLMConfigurationError, LLMGenerationError
@@ -26,12 +30,17 @@ class AskRequest(BaseModel):
 
 
 @router.post("/ask", response_model=GroundedAnswer)
-async def ask(payload: AskRequest, request: Request) -> GroundedAnswer:
+async def ask(
+    payload: AskRequest,
+    request: Request,
+    user: Annotated[UserIdentity | None, Depends(optional_user)],
+) -> GroundedAnswer:
+    settings = get_settings()
     service = getattr(request.app.state, "answer_service", None)
     if service is None:
         try:
             service = create_grounded_answer_service(
-                get_settings(),
+                settings,
                 request.app.state.qdrant,
             )
         except LLMConfigurationError as exc:
@@ -39,17 +48,36 @@ async def ask(payload: AskRequest, request: Request) -> GroundedAnswer:
         request.app.state.answer_service = service
 
     conversation_id = str(payload.conversation_id) if payload.conversation_id else None
+    owner_user_id = user.user_id if user is not None else None
+    history = []
+    if conversation_id is not None:
+        try:
+            exists = await request.app.state.conversation_store.assert_conversation_access(
+                conversation_id=conversation_id,
+                owner_user_id=owner_user_id,
+            )
+        except ConversationAccessError as exc:
+            raise HTTPException(status_code=404, detail="Unknown conversation") from exc
+        if exists and user is not None:
+            history = await request.app.state.conversation_store.load_history(
+                conversation_id=conversation_id,
+                owner_user_id=user.user_id,
+                limit=settings.history_max_turns,
+                max_chars=settings.history_max_chars,
+            )
+
     request_id = getattr(request.state, "request_id", None)
     started = perf_counter()
     token = begin_answer_trace()
     try:
-        answer = await service.answer(payload.question)
+        answer = await service.answer(payload.question, history=history)
     except LLMGenerationError as exc:
         await _finish_and_persist_failure(
             request,
             token=token,
             question=payload.question,
             conversation_id=conversation_id,
+            owner_user_id=owner_user_id,
             request_id=request_id,
             error=exc,
             started=started,
@@ -61,6 +89,7 @@ async def ask(payload: AskRequest, request: Request) -> GroundedAnswer:
             token=token,
             question=payload.question,
             conversation_id=conversation_id,
+            owner_user_id=owner_user_id,
             request_id=request_id,
             error=exc,
             started=started,
@@ -73,6 +102,7 @@ async def ask(payload: AskRequest, request: Request) -> GroundedAnswer:
             question=answer.question,
             answer=answer,
             conversation_id=conversation_id,
+            owner_user_id=owner_user_id,
             request_id=request_id,
             stage_durations=trace.stage_durations,
             total_duration_seconds=perf_counter() - started,
@@ -96,6 +126,7 @@ async def _finish_and_persist_failure(
     token: Token,
     question: str,
     conversation_id: str | None,
+    owner_user_id: str | None,
     request_id: str | None,
     error: Exception,
     started: float,
@@ -112,6 +143,7 @@ async def _finish_and_persist_failure(
         identity = await request.app.state.conversation_store.record_failure(
             question=question.strip(),
             conversation_id=conversation_id,
+            owner_user_id=owner_user_id,
             request_id=request_id,
             error_type=type(error).__name__,
             stage_durations=trace.stage_durations,
