@@ -10,8 +10,9 @@ from app.retrieval.models import RetrievalHit
 class CrossEncoderReranker:
     """Rerank a small retrieval candidate set with a FastEmbed cross-encoder."""
 
-    def __init__(self, model_name: str) -> None:
+    def __init__(self, model_name: str, *, batch_size: int = 32) -> None:
         self.model_name = model_name
+        self.batch_size = batch_size
 
     @cached_property
     def model(self) -> TextCrossEncoder:
@@ -45,11 +46,23 @@ class CrossEncoderReranker:
             )
             for hit, score in zip(candidates, scores, strict=True)
         ]
-        reranked.sort(key=lambda hit: hit.rerank_score or float("-inf"), reverse=True)
+        reranked.sort(
+            key=lambda hit: (
+                hit.rerank_score if hit.rerank_score is not None else float("-inf")
+            ),
+            reverse=True,
+        )
         return reranked[:limit]
 
     def _score(self, query: str, documents: list[str]) -> list[float]:
-        return [float(score) for score in self.model.rerank(query, documents)]
+        return [
+            float(score)
+            for score in self.model.rerank(
+                query,
+                documents,
+                batch_size=self.batch_size,
+            )
+        ]
 
     def _document_text(self, hit: RetrievalHit) -> str:
         context = [
