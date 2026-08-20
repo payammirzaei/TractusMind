@@ -1,5 +1,5 @@
 from app.chunking.models import ChunkKind, KnowledgeChunk
-from app.embeddings.text import build_embedding_text
+from app.embeddings.text import build_embedding_text, build_sparse_text
 from app.retrieval.qdrant_store import QdrantKnowledgeStore, model_scoped_collection_name
 
 
@@ -43,11 +43,22 @@ def test_embedding_text_adds_retrieval_context_without_mutating_source_text() ->
     assert chunk.text == "def create_asset(asset_id: str):\n    return asset_id"
 
 
+def test_sparse_text_keeps_exact_path_and_symbol_tokens() -> None:
+    chunk = _chunk()
+
+    text = build_sparse_text(chunk)
+
+    assert "tractusx_sdk/dataspace/services/connector.py" in text
+    assert "BaseConnectorService" in text
+    assert "create_asset" in text
+    assert text.endswith(chunk.text)
+
+
 def test_qdrant_payload_keeps_exact_traceability() -> None:
     chunk = _chunk()
     store = QdrantKnowledgeStore(client=object(), collection_name="test")  # type: ignore[arg-type]
 
-    payload = store._payload(chunk, "BAAI/bge-small-en-v1.5")
+    payload = store._payload(chunk, "BAAI/bge-small-en-v1.5", "Qdrant/bm25")
 
     assert payload["chunk_id"] == chunk.chunk_id
     assert payload["commit_sha"] == "a" * 40
@@ -55,14 +66,31 @@ def test_qdrant_payload_keeps_exact_traceability() -> None:
     assert payload["parent_symbol"] == "BaseConnectorService"
     assert payload["line_source_url"].endswith("#L120-L121")
     assert payload["embedding_model"] == "BAAI/bge-small-en-v1.5"
+    assert payload["sparse_model"] == "Qdrant/bm25"
 
 
-def test_qdrant_collection_is_isolated_by_embedding_model() -> None:
-    small = model_scoped_collection_name("tractusmind_knowledge", "BAAI/bge-small-en-v1.5")
-    large = model_scoped_collection_name("tractusmind_knowledge", "BAAI/bge-large-en-v1.5")
+def test_qdrant_collection_is_isolated_by_retrieval_models() -> None:
+    dense = model_scoped_collection_name(
+        "tractusmind_knowledge",
+        "BAAI/bge-small-en-v1.5",
+    )
+    hybrid = model_scoped_collection_name(
+        "tractusmind_knowledge",
+        "BAAI/bge-small-en-v1.5",
+        "Qdrant/bm25",
+    )
+    other_hybrid = model_scoped_collection_name(
+        "tractusmind_knowledge",
+        "BAAI/bge-small-en-v1.5",
+        "prithivida/Splade_PP_en_v1",
+    )
 
-    assert small.startswith("tractusmind_knowledge__")
-    assert small != large
-    assert small == model_scoped_collection_name(
-        "tractusmind_knowledge", "BAAI/bge-small-en-v1.5"
+    assert dense.startswith("tractusmind_knowledge__")
+    assert hybrid.startswith("tractusmind_knowledge__")
+    assert dense != hybrid
+    assert hybrid != other_hybrid
+    assert hybrid == model_scoped_collection_name(
+        "tractusmind_knowledge",
+        "BAAI/bge-small-en-v1.5",
+        "Qdrant/bm25",
     )
