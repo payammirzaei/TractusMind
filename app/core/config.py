@@ -1,7 +1,19 @@
 from functools import lru_cache
+from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+_SECRET_FILE_FIELDS = {
+    "database_url": "database_url_file",
+    "redis_url": "redis_url_file",
+    "qdrant_api_key": "qdrant_api_key_file",
+    "github_token": "github_token_file",
+    "llm_api_key": "llm_api_key_file",
+    "ops_admin_key": "ops_admin_key_file",
+    "metrics_admin_key": "metrics_admin_key_file",
+}
 
 
 class Settings(BaseSettings):
@@ -18,19 +30,32 @@ class Settings(BaseSettings):
     app_port: int = 8000
     log_level: str = "INFO"
 
+    trusted_hosts: str = "localhost,127.0.0.1,api,testserver"
+    cors_origins: str = ""
+    request_max_body_bytes: int = Field(default=65_536, ge=4_096, le=10_485_760)
+    max_concurrent_requests: int = Field(default=64, ge=1, le=10_000)
+    rate_limit_requests: int = Field(default=120, ge=1, le=100_000)
+    rate_limit_window_seconds: float = Field(default=60.0, gt=0.0, le=3_600.0)
+    trust_forwarded_for: bool = False
+
     database_url: str = "postgresql+asyncpg://tractusmind:tractusmind@postgres:5432/tractusmind"
+    database_url_file: str | None = None
     redis_url: str = "redis://redis:6379/0"
+    redis_url_file: str | None = None
 
     qdrant_url: str = "http://qdrant:6333"
     qdrant_api_key: str | None = None
+    qdrant_api_key_file: str | None = None
     qdrant_collection: str = "tractusmind_knowledge"
 
     github_token: str | None = None
+    github_token_file: str | None = None
     github_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
     github_max_attempts: int = Field(default=4, ge=1, le=10)
 
     llm_base_url: str | None = None
     llm_api_key: str | None = None
+    llm_api_key_file: str | None = None
     llm_model: str | None = None
     llm_timeout_seconds: float = Field(default=60.0, gt=0.0, le=300.0)
     llm_max_attempts: int = Field(default=3, ge=1, le=6)
@@ -61,9 +86,11 @@ class Settings(BaseSettings):
     source_sync_interval_seconds: int = Field(default=21_600, ge=300, le=604_800)
     source_sync_lock_seconds: int = Field(default=43_200, ge=300, le=604_800)
     ops_admin_key: str | None = None
+    ops_admin_key_file: str | None = None
 
     metrics_enabled: bool = True
     metrics_admin_key: str | None = None
+    metrics_admin_key_file: str | None = None
     worker_metrics_port: int = Field(default=9_101, ge=0, le=65_535)
     scheduler_metrics_port: int = Field(default=9_102, ge=0, le=65_535)
     otel_traces_endpoint: str | None = None
@@ -80,11 +107,41 @@ class Settings(BaseSettings):
     rerank_top_k: int = Field(default=6, ge=1, le=50)
     minimum_relevance_score: float | None = Field(default=None, ge=-100.0, le=100.0)
 
+    @model_validator(mode="before")
+    @classmethod
+    def load_secret_files(cls, values: object) -> object:
+        if not isinstance(values, dict):
+            return values
+        resolved = dict(values)
+        for target, file_field in _SECRET_FILE_FIELDS.items():
+            current = resolved.get(target)
+            secret_file = resolved.get(file_field)
+            if current not in (None, "") or secret_file in (None, ""):
+                continue
+            path = Path(str(secret_file))
+            try:
+                resolved[target] = path.read_text(encoding="utf-8").strip()
+            except OSError as exc:
+                raise ValueError(f"Unable to read secret file for {target}: {path}") from exc
+        return resolved
+
     @property
     def sqlalchemy_database_url(self) -> str:
         if self.database_url.startswith("postgresql://"):
             return self.database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
         return self.database_url
+
+    @property
+    def trusted_host_list(self) -> list[str]:
+        return self._csv(self.trusted_hosts)
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return self._csv(self.cors_origins)
+
+    @staticmethod
+    def _csv(value: str) -> list[str]:
+        return [item.strip() for item in value.split(",") if item.strip()]
 
 
 @lru_cache
