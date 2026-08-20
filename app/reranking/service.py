@@ -1,9 +1,11 @@
 import asyncio
 from collections.abc import Sequence
 from functools import cached_property
+from time import perf_counter
 
 from fastembed.rerank.cross_encoder import TextCrossEncoder
 
+from app.observability.metrics import MODEL_OPERATION_DURATION, record_model_load
 from app.retrieval.models import RetrievalHit
 
 
@@ -13,6 +15,7 @@ class CrossEncoderReranker:
     def __init__(self, model_name: str, *, batch_size: int = 32) -> None:
         self.model_name = model_name
         self.batch_size = batch_size
+        self._warmed = False
 
     @cached_property
     def model(self) -> TextCrossEncoder:
@@ -34,7 +37,13 @@ class CrossEncoderReranker:
             return []
 
         documents = [self._document_text(hit) for hit in candidates]
+        started = perf_counter()
         scores = await asyncio.to_thread(self._score, normalized_query, documents)
+        duration = perf_counter() - started
+        MODEL_OPERATION_DURATION.labels(role="reranker", operation="rerank").observe(duration)
+        if not self._warmed:
+            record_model_load("reranker", duration)
+            self._warmed = True
 
         reranked = [
             hit.model_copy(
