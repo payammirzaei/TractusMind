@@ -18,6 +18,16 @@ _FOLLOW_UP_PREFIXES = (
     "can that",
     "same ",
 )
+_ANAPHORIC_WORDS = {
+    "it",
+    "that",
+    "this",
+    "these",
+    "those",
+    "them",
+    "they",
+    "same",
+}
 
 
 def retrieval_question(question: str, history: list[ConversationTurn]) -> str:
@@ -42,4 +52,8 @@ def _needs_context(question: str) -> bool:
     lowered = question.casefold()
     if lowered.startswith(_FOLLOW_UP_PREFIXES):
         return True
-    return len(question.split()) <= 6
+    tokens = {
+        token.strip(".,?!:;()[]{}\"'")
+        for token in lowered.split()
+    }
+    return bool(tokens & _ANAPHORIC_WORDS)
