@@ -1,12 +1,14 @@
 from typing import Literal
 from uuid import UUID
 
+import structlog
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from app.observability.metrics import FEEDBACK
 
 router = APIRouter(prefix="/v1", tags=["feedback"])
+logger = structlog.get_logger()
 
 
 class FeedbackRequest(BaseModel):
@@ -40,6 +42,19 @@ async def submit_feedback(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Unknown completed interaction",
         )
+
+    if record.rating == "down":
+        try:
+            await request.app.state.quality_store.ensure_review(
+                interaction_id=record.interaction_id,
+                trigger="feedback_down",
+            )
+        except Exception as exc:
+            logger.exception(
+                "quality_review_capture_failed",
+                trigger="feedback_down",
+                error_type=type(exc).__name__,
+            )
 
     FEEDBACK.labels(rating=record.rating).inc()
     return FeedbackResponse(
