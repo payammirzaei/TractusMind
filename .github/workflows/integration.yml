@@ -57,7 +57,7 @@ jobs:
         env:
           SMOKE_OPS_ADMIN_KEY: integration-admin-key
           SMOKE_API_URL: http://127.0.0.1:8000
-          SMOKE_UI_URL: http://127.0.0.1:3100
+          SMOKE_UI_URL: http://localhost:3100
           SMOKE_TIMEOUT_SECONDS: "240"
         run: python scripts/full_stack_smoke.py
 
