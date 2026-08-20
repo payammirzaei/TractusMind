@@ -1,10 +1,13 @@
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
+from app.api.user_auth import optional_user
+from app.auth.store import UserIdentity
+from app.conversations.store import ConversationAccessError
 from app.observability.metrics import FEEDBACK
 
 router = APIRouter(prefix="/v1", tags=["feedback"])
@@ -30,13 +33,21 @@ class FeedbackResponse(BaseModel):
 async def submit_feedback(
     payload: FeedbackRequest,
     request: Request,
+    user: Annotated[UserIdentity | None, Depends(optional_user)],
 ) -> FeedbackResponse:
-    record = await request.app.state.conversation_store.upsert_feedback(
-        interaction_id=str(payload.interaction_id),
-        rating=payload.rating,
-        reason=payload.reason,
-        comment=payload.comment,
-    )
+    try:
+        record = await request.app.state.conversation_store.upsert_feedback(
+            interaction_id=str(payload.interaction_id),
+            actor_user_id=user.user_id if user is not None else None,
+            rating=payload.rating,
+            reason=payload.reason,
+            comment=payload.comment,
+        )
+    except ConversationAccessError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Unknown completed interaction",
+        ) from exc
     if record is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
