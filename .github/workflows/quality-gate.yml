@@ -19,6 +19,7 @@ jobs:
       QDRANT_URL: ${{ secrets.QUALITY_QDRANT_URL }}
       QDRANT_API_KEY: ${{ secrets.QUALITY_QDRANT_API_KEY }}
       QDRANT_COLLECTION: ${{ vars.QUALITY_QDRANT_COLLECTION || 'tractusmind_knowledge' }}
+      GITHUB_TOKEN: ${{ secrets.QUALITY_GITHUB_TOKEN }}
       LLM_BASE_URL: ${{ secrets.QUALITY_LLM_BASE_URL }}
       LLM_API_KEY: ${{ secrets.QUALITY_LLM_API_KEY }}
       LLM_MODEL: ${{ vars.QUALITY_LLM_MODEL }}
@@ -37,6 +38,7 @@ jobs:
           set -euo pipefail
           test -n "$DATABASE_URL" || { echo "QUALITY_DATABASE_URL is required"; exit 2; }
           test -n "$QDRANT_URL" || { echo "QUALITY_QDRANT_URL is required"; exit 2; }
+          test -n "$GITHUB_TOKEN" || { echo "QUALITY_GITHUB_TOKEN is required"; exit 2; }
           test -n "$LLM_BASE_URL" || { echo "QUALITY_LLM_BASE_URL is required"; exit 2; }
           test -n "$LLM_API_KEY" || { echo "QUALITY_LLM_API_KEY is required"; exit 2; }
           test -n "$LLM_MODEL" || { echo "QUALITY_LLM_MODEL variable is required"; exit 2; }
@@ -47,9 +49,9 @@ jobs:
       - name: Prepare reports
         run: mkdir -p artifacts/quality
 
-      - name: Validate full corpus snapshot
+      - name: Validate full corpus snapshot and upstream freshness
         run: >-
-          tractusmind-corpus-validate
+          tractusmind-corpus-validate --verify-upstream
           > artifacts/quality/corpus.json
 
       - name: Run full corpus retrieval report
