@@ -7,8 +7,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.conversations.models import AnswerFeedback, AnswerInteraction
+from app.db import verify_database_revision
 from app.quality.models import QualityReview, RegressionCase
-from app.state.models import Base
 
 
 class ReviewStateError(RuntimeError):
@@ -64,8 +64,7 @@ class QualityStore:
         async with self._schema_lock:
             if self._schema_ready:
                 return
-            async with self.engine.begin() as connection:
-                await connection.run_sync(Base.metadata.create_all)
+            await verify_database_revision(self.engine)
             self._schema_ready = True
 
     async def ensure_review(self, *, interaction_id: str, trigger: str) -> str | None:
