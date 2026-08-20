@@ -13,6 +13,9 @@ import {
   safeReturnTo,
 } from "@/lib/server-oidc";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 function errorRedirect(request: Request, code: string) {
   const target = new URL("/", request.url);
   target.searchParams.set("auth_error", code);
