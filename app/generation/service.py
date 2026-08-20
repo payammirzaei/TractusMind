@@ -84,6 +84,8 @@ class GroundedAnswerService:
 
         citation_map = context.citations
         cited_ids = _CITATION_RE.findall(payload.answer)
+        inline_ids = set(cited_ids)
+        declared_ids = set(payload.citation_ids)
         invalid_ids = [
             citation_id for citation_id in cited_ids if citation_id not in citation_map
         ]
@@ -92,7 +94,12 @@ class GroundedAnswerService:
             for citation_id in payload.citation_ids
             if citation_id not in citation_map
         ]
-        if invalid_ids or declared_invalid or not cited_ids:
+        if (
+            invalid_ids
+            or declared_invalid
+            or not cited_ids
+            or declared_ids != inline_ids
+        ):
             return self._abstain(normalized, evidence_count=len(context.blocks))
 
         verification = await self.verifier.verify(
