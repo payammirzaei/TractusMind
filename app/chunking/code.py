@@ -155,9 +155,8 @@ class CodeChunker:
         return node
 
     def _class_context_text(self, node: Node, source_bytes: bytes, language: str) -> str:
-        declaration_types = _DECLARATION_TYPES[language]
-        method_types = declaration_types & _METHOD_LIKE_TYPES
-        first_method = next((child for child in node.children if child.type in method_types), None)
+        method_types = _DECLARATION_TYPES[language] & _METHOD_LIKE_TYPES
+        first_method = self._first_member(node, method_types)
         end_byte = first_method.start_byte if first_method is not None else node.end_byte
         context = source_bytes[node.start_byte:end_byte].decode("utf-8").strip()
 
@@ -166,6 +165,16 @@ class CodeChunker:
 
         full_text = source_bytes[node.start_byte : node.end_byte].decode("utf-8")
         return full_text[: self.max_chars]
+
+    def _first_member(self, node: Node, target_types: set[str]) -> Node | None:
+        for child in node.children:
+            if child.type in target_types:
+                return child
+        for child in node.children:
+            for grandchild in child.children:
+                if grandchild.type in target_types:
+                    return grandchild
+        return None
 
     def _fallback_document_chunk(self, document: RawDocument) -> list[KnowledgeChunk]:
         chunks: list[KnowledgeChunk] = []
