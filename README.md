@@ -3,27 +3,26 @@
 **A source-grounded AI engineering copilot for the Tractus-X ecosystem.**
 
 TractusMind answers architecture, documentation, coding, debugging, semantic-model, and
-version-specific questions using traceable Tractus-X sources. Retrieval quality, source
-provenance, and evaluation come before UI work.
+version-specific questions using traceable Tractus-X sources. Retrieval quality, provenance,
+inspectability, and measurable evaluation come before UI work.
 
 ## Foundation stack
 
 - Python 3.12 + FastAPI
-- Qdrant dense + sparse retrieval
+- Qdrant dense + BM25 sparse retrieval
 - FastEmbed `BAAI/bge-small-en-v1.5` dense embeddings
-- FastEmbed `Qdrant/bm25` sparse lexical retrieval
-- Qdrant RRF hybrid fusion
-- Debug exact phrase/symbol/path retrieval with full-text payload indexing
+- FastEmbed `Qdrant/bm25` sparse retrieval
+- Qdrant RRF fusion
+- Exact debug phrase/symbol/path/config retrieval
 - FastEmbed cross-encoder reranking with `Xenova/ms-marco-MiniLM-L-6-v2`
 - Deterministic version-aware query routing
-- OpenAI-compatible LLM provider interface
-- Claim-level groundedness verification
-- PostgreSQL for application and ingestion state
-- Redis + Dramatiq for background ingestion jobs
-- Tree-sitter for AST-aware code chunking
+- OpenAI-compatible grounded generation
+- Claim-level answer verification
+- PostgreSQL source/file state + ingestion-run history
+- Redis + Dramatiq background ingestion
+- Tree-sitter structure-aware code chunking
 - Docker / Docker Compose
 - GitHub Actions
-- Railway-ready environment configuration
 
 ## Local development
 
@@ -32,13 +31,15 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Useful endpoints:
+Services:
 
 - API: `http://localhost:8000`
 - OpenAPI: `http://localhost:8000/docs`
-- Liveness: `http://localhost:8000/health/live`
-- Readiness: `http://localhost:8000/health/ready`
-- Qdrant dashboard: `http://localhost:6333/dashboard`
+- Qdrant: `http://localhost:6333/dashboard`
+- Dramatiq ingestion worker
+- scheduled source-sync service
+- PostgreSQL
+- Redis
 
 Without Docker:
 
@@ -48,45 +49,135 @@ pytest -q
 ruff check .
 ```
 
-## Source ingestion and retrieval
+## Source registry and ingestion
 
 Official Tractus-X sources are allowlisted in `config/sources.toml`. Every repository ref is
-resolved to an immutable commit SHA before content is fetched.
+resolved to an immutable Git commit before content is fetched.
+
+Useful commands:
 
 ```bash
 tractusmind-ingest discover tractusx-sdk
 tractusmind-ingest fetch tractusx-sdk --limit 3
 tractusmind-ingest chunk tractusx-sdk --limit 3
 tractusmind-ingest index tractusx-sdk --limit 10
-tractusmind-ingest index tractusx-sdk
 ```
 
-Fetched files become canonical `RawDocument` objects with stable IDs, source/version ref,
-commit SHA, blob SHA, language/content type, SHA-256 content hash, normalized UTF-8 text, and
-commit-pinned URLs. `version_ref` is propagated into every `KnowledgeChunk`, Qdrant payload,
-retrieval hit, evidence block, and answer citation.
+For production-shaped source maintenance, use incremental synchronization:
 
-After upgrading an older index to this milestone, run a full source re-index. This backfills both
-`version_ref` and the new `debug_text` payload used by exact debug lookup. Index creation also adds
-a Qdrant full-text index with whitespace tokenization and phrase matching.
+```bash
+tractusmind-ingest sync tractusx-sdk
+```
 
-Smart chunking keeps retrieval units source-traceable:
+The first managed sync establishes PostgreSQL state. Later syncs compare the new manifest against
+stored Git blob SHAs and divide files into:
 
-- Markdown: heading hierarchy aware
-- Python/Java/Kotlin/TypeScript/JavaScript: Tree-sitter symbol aware
-- Code chunks: parent symbol relationships preserved
-- YAML: top-level configuration aware
-- Turtle/SAMM: semantic statement aware
-- Every chunk: exact line range + commit-pinned citation URL
+```text
+added
+modified
+deleted
+unchanged
+```
 
-Hybrid indexing stores both a named dense vector and a BM25 sparse vector for every chunk.
-The first stage uses dense + BM25 retrieval with RRF fusion. A cross-encoder then reranks a
-small candidate set while preserving both first-stage and reranker scores.
+Only `added` and `modified` files are downloaded, chunked, embedded, and upserted. Unchanged files
+receive a metadata-only snapshot update in Qdrant. Deleted paths are removed.
+
+PostgreSQL stores:
+
+- `source_state`: current successful source snapshot.
+- `source_file_state`: path + Git blob fingerprint + content commit per file.
+- `ingestion_run`: auditable run history and delta counters.
+
+See [`docs/incremental-ingestion.md`](docs/incremental-ingestion.md).
+
+## Snapshot and citation provenance
+
+Incremental indexing keeps two commit identities:
+
+```text
+snapshot_commit_sha = repository snapshot currently being queried
+commit_sha          = exact commit containing the cited file content
+```
+
+If a file does not change between repository commits, TractusMind does **not** re-embed it. Its
+`snapshot_commit_sha` moves forward while its exact content commit and commit-pinned source URL
+remain unchanged.
+
+This preserves both efficient incremental ingestion and exact citations.
+
+## Background ingestion
+
+TractusMind can keep the allowlisted corpus fresh without a human running the sync CLI.
+
+```text
+Scheduler
+   ↓
+Redis / Dramatiq
+   ↓
+Ingestion Worker
+   ↓
+per-source distributed Redis lock
+   ↓
+IncrementalSourceSync
+   ↓
+PostgreSQL + Qdrant
+```
+
+The default scheduler queues all enabled sources immediately on startup and then every six hours:
+
+```bash
+SOURCE_SYNC_INTERVAL_SECONDS=21600
+```
+
+A per-source Redis distributed lock prevents two workers from synchronizing the same source at the
+same time:
+
+```bash
+SOURCE_SYNC_LOCK_SECONDS=43200
+```
+
+The default Compose worker uses one process and one thread because an indexing job may load dense
+and sparse embedding models into memory. Multiple worker replicas can still be added because the
+source lock is shared through Redis.
+
+Manual queue controls:
+
+```bash
+# queue one source
+tractusmind-ingest enqueue tractusx-sdk
+
+# queue every enabled source
+tractusmind-ingest enqueue-all
+
+# run one scheduler cycle
+tractusmind-scheduler --once
+
+# long-running scheduler
+tractusmind-scheduler
+```
+
+The worker actor retries runtime failures through the same idempotent incremental sync path. No
+unauthenticated public HTTP endpoint is exposed for ingestion mutations.
+
+See [`docs/background-ingestion.md`](docs/background-ingestion.md).
+
+## Smart chunking
+
+Fetched files become canonical `RawDocument` objects with stable IDs, version ref, exact commit,
+blob SHA, language/content type, normalized UTF-8 text, content hash, and commit-pinned URL.
+
+Chunkers preserve source structure:
+
+- Markdown: heading hierarchy
+- Python / Java / Kotlin / TypeScript / JavaScript: Tree-sitter symbols
+- code: parent symbol relationships
+- YAML: top-level logical objects
+- Turtle / SAMM: semantic statements
+- every chunk: exact line range + source provenance
 
 ## Version-aware query routing
 
-Every production query is routed before retrieval. The router is deterministic and has no LLM
-cost. It currently recognizes:
+Before retrieval, a deterministic router detects:
 
 - SDK
 - EDC
@@ -96,70 +187,63 @@ cost. It currently recognizes:
 - Debug/error questions
 - General fallback
 
-The route records `intent`, selected `source_ids`, detected semantic `version`, explicit `ref`,
-explicit `commit_sha`, and human-readable routing reasons. Source/ref/commit constraints become
-Qdrant payload filters before retrieval.
+The route records intent, selected source IDs, semantic version, explicit `ref:`, explicit
+`commit:`, and routing reasons.
+
+Examples:
 
 ```bash
-# SDK route -> tractusx-sdk + docs
 tractusmind-ingest search "How do I create an asset with the Tractus-X SDK?"
-
-# Debug route -> EDC-focused source filter + exact debug lane
 tractusmind-ingest search "EDC connector returns 500 error during transfer"
-
-# Release version is detected and routed to release evidence
 tractusmind-ingest search "What changed for SAMM in release 24.05?"
-
-# Explicit indexed ref/commit constraints are hard filters
 tractusmind-ingest search "Check EDC ref:v0.9.0 commit:abcdef1234567 connector behavior"
 ```
 
-Semantic versions such as `24.05` are not blindly converted into a hard `version_ref` filter,
-because one release repository/ref may document several releases. Explicit `ref:` and `commit:`
-constraints are exact and fail closed when matching indexed provenance is unavailable.
+Explicit `commit:` selects the indexed repository snapshot via `snapshot_commit_sha`.
 
-## Debug retrieval lane
+## Retrieval pipeline
 
-Queries routed as `debug` use an additional exact-search lane before cross-encoder reranking.
-The query parser extracts engineering signals such as quoted error text, exception classes,
-CamelCase/snake_case identifiers, dotted config keys, file paths, environment-style identifiers,
-and HTTP 4xx/5xx codes.
-
-The debug path is:
+Normal questions:
 
 ```text
-debug query
-  -> route/source/ref/commit filter
-  -> exact phrase + symbol + parent-symbol + path lookup
-  -> normal dense + BM25 hybrid retrieval
-  -> weighted RRF across exact + hybrid candidates
-  -> cross-encoder reranker
+question
+  -> route + metadata filter
+  -> dense retrieval
+  -> BM25 sparse retrieval
+  -> Qdrant RRF
+  -> cross-encoder reranking
   -> final evidence
 ```
 
-Exact lookup uses the `debug_text` Qdrant payload field, which combines path, symbols, section
-metadata, and original chunk text. Exact symbol/path hits receive stronger first-stage weights,
-but the cross-encoder still makes the final evidence ordering decision.
+Debug questions add an exact-search lane:
 
-Every retrieval hit preserves `debug_score` and `retrieval_methods`, for example
-`exact_symbol`, `exact_phrase`, `identifier_text`, and `hybrid`. The same provenance is exposed
-through answer citations and the search CLI.
-
-Debug fusion settings are configurable:
-
-```bash
-DEBUG_EXACT_K=30
-DEBUG_RRF_K=60
-DEBUG_EXACT_WEIGHT=1.5
-DEBUG_HYBRID_WEIGHT=1.0
+```text
+error / stacktrace / symbol / config / path
+  -> exact phrase + symbol + parent-symbol + path lookup
+  -> normal dense + BM25 retrieval
+  -> weighted RRF across exact + hybrid candidates
+  -> cross-encoder reranking
+  -> final evidence
 ```
 
-If an older index has not yet been re-indexed with `debug_text`, the exact lane can return no
-candidates while the normal hybrid lane continues to function.
+Debug query parsing recognizes quoted error messages, exception classes, CamelCase and snake_case
+identifiers, dotted config keys, paths, environment-style identifiers, and HTTP 4xx/5xx codes.
+
+Every hit can preserve:
+
+```text
+retrieval_score
+rerank_score
+debug_score
+retrieval_methods
+snapshot_commit_sha
+commit_sha
+source URL + exact lines
+```
 
 ## Grounded answer generation
 
-Configure any OpenAI-compatible chat-completions provider:
+Configure an OpenAI-compatible chat-completions provider:
 
 ```bash
 LLM_BASE_URL=https://provider.example/v1
@@ -167,7 +251,7 @@ LLM_API_KEY=...
 LLM_MODEL=...
 ```
 
-Then ask:
+Ask through:
 
 ```http
 POST /v1/ask
@@ -182,42 +266,29 @@ Production answer path:
 
 ```text
 question
-  -> deterministic query routing
-  -> source/ref/commit payload filtering
-  -> normal hybrid OR debug exact+hybrid candidate generation
-  -> cross-encoder reranking
+  -> routing
+  -> retrieval
+  -> reranking
   -> bounded evidence context
   -> grounded LLM generation
   -> backend citation validation
-  -> claim-level evidence verification
-  -> final answer or abstention
+  -> atomic claim verification
+  -> answer or abstention
 ```
 
-Evidence IDs such as `[S1]` are assigned by the backend. The model is not trusted to invent
-repository URLs, source IDs, refs, commit SHAs, paths, or line numbers. Structured `citation_ids`
-must exactly match inline citations in the generated answer.
+The backend owns evidence IDs such as `[S1]`. The model is not trusted to invent repository URLs,
+source IDs, refs, commits, paths, or line numbers. Structured citation IDs must match inline
+citations, and unsupported claims fail closed.
 
-The API response preserves the route decision, retrieval-method trace, and exact
-`version_ref` + commit provenance for each citation. The claim verifier performs a second pass
-over the answer and evidence, breaks the answer into atomic factual claims, and checks whether
-each cited source directly supports it.
+## Evaluation
 
-If verification fails, TractusMind returns an abstention rather than a supposedly grounded
-answer. The verification report is preserved in the API response for inspection.
-
-## Retrieval benchmark
-
-The general retrieval seed is stored in `benchmarks/dense_v0.jsonl`.
+General retrieval benchmark:
 
 ```bash
 tractusmind-benchmark --mode all --k 5
-tractusmind-benchmark --mode dense --k 5
-tractusmind-benchmark --mode hybrid --k 5
-tractusmind-benchmark --mode rerank --k 5
 ```
 
-Debug-specific retrieval uses a separate seed built from identifiers verified in current
-Tractus-X sources:
+Debug retrieval benchmark:
 
 ```bash
 tractusmind-benchmark \
@@ -226,121 +297,75 @@ tractusmind-benchmark \
   --k 5
 ```
 
-All benchmark modes use the same deterministic router as production. Per-case reports include
-the route trace as well as retrieval metrics.
+Current retrieval metrics include evidence hit rate, MRR, NDCG@K, first relevant rank, route, and
+source trace.
 
-Current retrieval metrics:
-
-- Recall@K / evidence hit rate
-- MRR
-- NDCG@K
-- per-question first relevant rank and source trace
-
-## Answer evaluation and abstention calibration
-
-`benchmarks/answer_v0.jsonl` contains 10 answerable Tractus-X questions and 6 deliberately
-unanswerable negative cases. The negative set prevents an always-answer system from looking
-artificially good.
-
-Calibrate the reranker evidence threshold without calling the LLM:
+Calibrate abstention without an LLM call:
 
 ```bash
 tractusmind-answer-eval calibrate --max-unsafe-rate 0
 ```
 
-Calibration uses the same router and retrieval services as production. The sweep reports:
-
-- recommended `MINIMUM_RELEVANCE_SCORE`
-- true accept rate on answerable questions
-- false abstention rate
-- unsafe evidence accept rate on negative questions
-- balanced accuracy
-
-The recommended value is printed as an environment-variable assignment. It is not written into
-the repository automatically because calibration depends on the indexed corpus and reranker.
-
-With an LLM provider configured, run the full answer gate:
+Run end-to-end answer evaluation with an LLM configured:
 
 ```bash
 tractusmind-answer-eval evaluate
 ```
 
-End-to-end metrics:
+Answer metrics include grounded answer accuracy, citation correctness, claim support rate, false
+abstention rate, and unsafe answer rate.
 
-- grounded answer accuracy
-- citation correctness against expected source IDs
-- claim support rate from the verification report
-- false abstention rate on answerable cases
-- unsafe answer rate on unanswerable cases
+## Inspectability principle
 
-Calibration and answer evaluation are intentionally separate. The former measures the evidence
-acceptance boundary without LLM variability; the latter measures the complete production path.
-
-## Design principle
-
-No hidden RAG magic. A production request should remain inspectable end to end:
+No hidden RAG magic. A production answer should remain inspectable as:
 
 ```text
 question
-  -> detected intent
-  -> source/version/ref/commit route
-  -> payload filter
-  -> dense candidates
-  -> sparse candidates
-  -> exact debug candidates when applicable
-  -> fusion score + retrieval methods
-  -> cross-encoder rerank score
+  -> route
+  -> source/ref/snapshot filter
+  -> dense/sparse/exact candidates
+  -> fusion scores
+  -> rerank scores
   -> evidence threshold
   -> final evidence
   -> generated answer
-  -> citation validation
+  -> citations
   -> atomic claims
   -> claim/evidence verdicts
-  -> final answer or abstention
-  -> evaluation result
+  -> answer or abstention
 ```
 
-See [`docs/architecture.md`](docs/architecture.md) for the architecture contract.
+See [`docs/architecture.md`](docs/architecture.md).
 
 ## Current milestone
 
-**V7 — Debug Retrieval Lane**
+**V9 — Automated Incremental Source Synchronization**
 
-- [x] FastAPI service shell
-- [x] Qdrant/PostgreSQL/Redis connectivity contract
-- [x] Background worker shell
-- [x] Docker Compose local environment
-- [x] CI lint + test
-- [x] Tractus-X source registry
-- [x] Version-pinned GitHub manifest discovery
-- [x] Commit-pinned content fetching
-- [x] Canonical `RawDocument` provenance
-- [x] Markdown / code / YAML / Turtle smart chunking
-- [x] Stable `KnowledgeChunk` IDs + exact line ranges
-- [x] Dense embeddings + BM25 sparse embeddings
-- [x] Model-scoped hybrid Qdrant collection
-- [x] Dense + sparse RRF fusion
-- [x] Cross-encoder reranking with preserved first-stage scores
-- [x] OpenAI-compatible grounded generation provider
-- [x] Backend-owned citation IDs and exact source mapping
-- [x] `/v1/ask` API endpoint
-- [x] Structured/inline citation consistency gate
-- [x] Atomic claim extraction and evidence verification
-- [x] Fail-closed answer gate with verification report
-- [x] Positive + negative answerability benchmark seed
-- [x] Safety-first reranker threshold calibration
-- [x] Grounded/citation/claim/abstention evaluation metrics
-- [x] Deterministic SDK/EDC/DTR/SAMM/release/debug routing
-- [x] Semantic version extraction + explicit ref/commit constraints
-- [x] Qdrant source/ref/commit payload filters
-- [x] `version_ref` provenance from ingestion through citations
-- [x] Exact debug phrase/symbol/path/config lookup
-- [x] Debug + hybrid weighted RRF fusion
-- [x] Retrieval-method/debug-score provenance
-- [x] Real-source debug retrieval benchmark seed
+- [x] source-grounded FastAPI query service
+- [x] allowlisted Tractus-X source registry
+- [x] immutable commit-pinned GitHub discovery and fetch
+- [x] structure-aware documentation/code/semantic chunking
+- [x] dense + BM25 hybrid retrieval
+- [x] cross-encoder reranking
+- [x] version-aware deterministic routing
+- [x] exact debugging retrieval lane
+- [x] grounded generation + backend-owned citations
+- [x] atomic claim verification + fail-closed answer gate
+- [x] retrieval/answer evaluation and abstention calibration tooling
+- [x] PostgreSQL source/file state
+- [x] added/modified/deleted/unchanged delta planning
+- [x] incremental fetch/chunk/embed/index
+- [x] snapshot-commit versus content-commit provenance
+- [x] ingestion-run audit history
+- [x] Dramatiq background source-sync actor
+- [x] Redis distributed per-source lock
+- [x] configurable scheduled sync of all enabled sources
+- [x] CLI queue controls
+- [x] Docker worker + scheduler topology
 - [ ] run full-corpus debug benchmark and tune fusion weights
-- [ ] run calibration against a fully indexed corpus and persist the measured threshold
-- [ ] incremental re-indexing and source-state persistence
+- [ ] run full-corpus abstention calibration and persist the measured threshold
+- [ ] expose authenticated ingestion status/operations endpoints
+- [ ] add production observability for queues, runs, latency, and model cache
 
 ## License
 
