@@ -10,7 +10,7 @@ def _history() -> list[ConversationTurn]:
     ]
 
 
-def test_short_follow_up_uses_previous_user_question_for_retrieval() -> None:
+def test_follow_up_uses_previous_user_question_for_retrieval() -> None:
     query = retrieval_question("What about contracts?", _history())
 
     assert "How do I create an asset" in query
@@ -21,6 +21,18 @@ def test_explicit_new_question_does_not_inherit_previous_retrieval_context() -> 
     question = "Explain the EDC control plane and data plane architecture in detail."
 
     assert retrieval_question(question, _history()) == question
+
+
+def test_short_standalone_question_does_not_inherit_previous_context() -> None:
+    question = "Explain EDC control plane."
+
+    assert retrieval_question(question, _history()) == question
+
+
+def test_anaphoric_follow_up_uses_previous_user_question() -> None:
+    query = retrieval_question("How does that work?", _history())
+
+    assert "Previous user question" in query
 
 
 def test_formatted_history_is_clearly_role_delimited() -> None:
