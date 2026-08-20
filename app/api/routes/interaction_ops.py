@@ -5,13 +5,13 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 
-from app.api.ops_auth import require_ops_admin
+from app.api.ops_auth import require_ops_operator
 from app.conversations.store import InteractionRecord
 
 router = APIRouter(
     prefix="/v1/ops",
     tags=["operations"],
-    dependencies=[Depends(require_ops_admin)],
+    dependencies=[Depends(require_ops_operator)],
 )
 
 
@@ -94,9 +94,7 @@ async def interaction(
     interaction_id: UUID,
     request: Request,
 ) -> InteractionOpsStatus:
-    record = await request.app.state.conversation_store.get_interaction(
-        str(interaction_id)
-    )
+    record = await request.app.state.conversation_store.get_interaction(str(interaction_id))
     if record is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -107,6 +105,4 @@ async def interaction(
 
 @router.get("/feedback/summary", response_model=FeedbackSummary)
 async def feedback_summary(request: Request) -> FeedbackSummary:
-    return FeedbackSummary(
-        counts=await request.app.state.conversation_store.feedback_counts()
-    )
+    return FeedbackSummary(counts=await request.app.state.conversation_store.feedback_counts())
