@@ -2,6 +2,7 @@ from app.generation.context import build_grounded_context
 from app.generation.service import GroundedAnswerService
 from app.generation.verification import ClaimVerifier
 from app.retrieval.models import RetrievalHit
+from app.routing.models import QueryRoute
 
 
 def _hit(*, score: float = 0.8) -> RetrievalHit:
@@ -14,6 +15,7 @@ def _hit(*, score: float = 0.8) -> RetrievalHit:
         source_id="tractusx-sdk",
         repository="eclipse-tractusx/tractusx-sdk",
         component="sdk",
+        version_ref="main",
         commit_sha="a" * 40,
         path="tractusx_sdk/connector.py",
         content_type="code",
@@ -30,8 +32,16 @@ def _hit(*, score: float = 0.8) -> RetrievalHit:
 class FakeRetrieval:
     def __init__(self, hits: list[RetrievalHit]) -> None:
         self.hits = hits
+        self.last_route: QueryRoute | None = None
 
-    async def search(self, query: str, *, limit: int = 6) -> list[RetrievalHit]:
+    async def search(
+        self,
+        query: str,
+        *,
+        limit: int = 6,
+        route: QueryRoute | None = None,
+    ) -> list[RetrievalHit]:
+        self.last_route = route
         return self.hits[:limit]
 
 
@@ -64,6 +74,7 @@ def test_context_assigns_backend_owned_citation_ids() -> None:
 
     assert "[S1]" in context.text
     assert context.citations["S1"].commit_sha == "a" * 40
+    assert context.citations["S1"].version_ref == "main"
     assert context.citations["S1"].start_line == 10
 
 
@@ -78,11 +89,14 @@ async def test_grounded_answer_passes_claim_verification() -> None:
         ),
     )
 
-    answer = await service.answer("How do I create an asset?")
+    answer = await service.answer("How do I create an asset with the SDK?")
 
     assert answer.grounded is True
     assert answer.abstained is False
     assert answer.citations[0].citation_id == "S1"
+    assert answer.route is not None
+    assert answer.route.intent.value == "sdk"
+    assert "tractusx-sdk" in answer.route.source_ids
     assert answer.verification is not None
     assert answer.verification.passed is True
 
@@ -102,6 +116,7 @@ async def test_answer_abstains_when_claim_is_unsupported() -> None:
 
     assert answer.grounded is False
     assert answer.abstained is True
+    assert answer.route is not None
     assert answer.verification is not None
     assert answer.verification.passed is False
     assert answer.verification.unsupported_claim_count == 1
@@ -145,3 +160,4 @@ async def test_answer_abstains_before_llm_when_no_evidence() -> None:
 
     assert answer.abstained is True
     assert answer.evidence_count == 0
+    assert answer.route is not None
