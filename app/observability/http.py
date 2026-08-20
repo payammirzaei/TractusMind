@@ -13,6 +13,7 @@ async def observe_http_request(request: Request, call_next) -> Response:
         return await call_next(request)
 
     request_id = request.headers.get("X-Request-ID") or str(uuid4())
+    request.state.request_id = request_id
     log_context = {"request_id": request_id}
     span_context = trace.get_current_span().get_span_context()
     if span_context.is_valid:
