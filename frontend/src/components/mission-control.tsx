@@ -12,6 +12,7 @@ import {
   Database,
   Gauge,
   KeyRound,
+  LayoutDashboard,
   LogOut,
   Search,
   SearchCode,
@@ -23,11 +24,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ChatWorkbench } from "@/components/chat-workbench";
+import { CommandCenter } from "@/components/command-center";
 import { DataDeck } from "@/components/data-deck";
 import type { Identity, UserRole } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-export type MissionView = "chat" | "sources" | "ops" | "quality" | "admin";
+export type MissionView = "chat" | "overview" | "sources" | "ops" | "quality" | "admin";
 
 type HealthCheck = "ok" | "error";
 type SystemHealth = {
@@ -50,6 +52,7 @@ type NavItem = {
 
 const NAV: NavItem[] = [
   { view: "chat", href: "/", label: "Copilot", description: "Ask grounded engineering questions and inspect evidence", icon: Bot, minimum: "user" },
+  { view: "overview", href: "/overview", label: "Overview", description: "See live health, coverage, ingestion and quality signals", icon: LayoutDashboard, minimum: "operator" },
   { view: "sources", href: "/sources", label: "Sources", description: "Inspect versioned repositories, refs and indexed snapshots", icon: Database, minimum: "operator" },
   { view: "ops", href: "/ops", label: "Operations", description: "Watch ingestion health, synchronization and run telemetry", icon: Gauge, minimum: "operator" },
   { view: "quality", href: "/quality", label: "Quality", description: "Review failures and promote guarded regression cases", icon: ShieldCheck, minimum: "operator" },
@@ -239,11 +242,11 @@ export function MissionControl({ view }: { view: MissionView }) {
         </aside>
         <section className="flex min-w-0 flex-1 flex-col p-1 sm:p-2">
           <header className="mb-2 flex h-12 items-center justify-between gap-3 px-2 sm:px-3">
-            <div className="min-w-0"><div className="flex items-center gap-3"><span className="tm-label">{view === "chat" ? "copilot channel" : `${view} console`}</span><span className="hidden h-3 w-px bg-white/8 sm:block"/><span className="hidden truncate text-[10px] text-slate-600 sm:block">{current.description}</span></div></div>
+            <div className="min-w-0"><div className="flex items-center gap-3"><span className="tm-label">{view === "chat" ? "copilot channel" : view === "overview" ? "command center" : `${view} console`}</span><span className="hidden h-3 w-px bg-white/8 sm:block"/><span className="hidden truncate text-[10px] text-slate-600 sm:block">{current.description}</span></div></div>
             <div className="flex shrink-0 items-center gap-2"><button onClick={() => { setCommandQuery(""); setCommandOpen(true); }} className="tm-control flex size-8 items-center justify-center rounded-lg md:hidden" aria-label="Open command launcher"><Command className="size-3.5 text-cyan-200"/></button><Badge className={cn("hidden sm:inline-flex", healthBadgeClass)}><Activity className="size-3"/><span className={`tm-led ${healthLedClass}`}/> core {healthState}</Badge><Badge className="text-emerald-300"><span className="tm-led"/> connected</Badge></div>
           </header>
-          {view === "chat" ? <ChatWorkbench /> : <DataDeck view={view} identity={identity} />}
-          <nav className="tm-mobile-nav mt-2 grid grid-cols-5 gap-1 px-1 md:hidden">{permitted.map((item) => { const Icon = item.icon; const active = pathname === item.href; return <Link key={item.view} href={item.href} className={cn("flex min-w-0 flex-col items-center justify-center gap-1 rounded-lg px-1 py-2 text-[8px] uppercase tracking-[.08em] text-slate-600", active && "is-active text-cyan-200")}><Icon className="size-3.5"/><span className="truncate">{item.label}</span></Link>; })}</nav>
+          {view === "chat" ? <ChatWorkbench /> : view === "overview" ? <CommandCenter identity={identity}/> : <DataDeck view={view} identity={identity} />}
+          <nav className="tm-mobile-nav mt-2 grid gap-1 px-1 md:hidden" style={{ gridTemplateColumns: `repeat(${permitted.length}, minmax(0, 1fr))` }}>{permitted.map((item) => { const Icon = item.icon; const active = pathname === item.href; return <Link key={item.view} href={item.href} className={cn("flex min-w-0 flex-col items-center justify-center gap-1 rounded-lg px-1 py-2 text-[8px] uppercase tracking-[.08em] text-slate-600", active && "is-active text-cyan-200")}><Icon className="size-3.5"/><span className="truncate">{item.label}</span></Link>; })}</nav>
         </section>
       </div>
       <CommandLauncher open={commandOpen} query={commandQuery} setQuery={setCommandQuery} items={permitted} activeView={view} health={health} healthReachable={healthReachable} identity={identity} onClose={() => setCommandOpen(false)} onNavigate={navigate}/>
