@@ -14,6 +14,7 @@ from app.evaluation.calibration import CalibrationSample, calibrate_threshold
 from app.generation.factory import create_grounded_answer_service
 from app.infra.qdrant import create_qdrant_client
 from app.retrieval.factory import create_reranked_retrieval_service
+from app.routing.service import QueryRouter
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -71,6 +72,11 @@ async def _evaluate(args: argparse.Namespace) -> None:
                     "correct": result.correct,
                     "grounded": answer.grounded,
                     "abstained": answer.abstained,
+                    "route": (
+                        answer.route.model_dump(mode="json")
+                        if answer.route is not None
+                        else None
+                    ),
                     "citation_ids": [
                         citation.citation_id for citation in answer.citations
                     ],
@@ -115,10 +121,17 @@ async def _calibrate(args: argparse.Namespace) -> None:
 
     qdrant = create_qdrant_client(settings)
     retrieval = create_reranked_retrieval_service(settings, qdrant)
+    router = QueryRouter()
     samples: list[CalibrationSample] = []
+    route_details: dict[str, dict] = {}
     try:
         for case in cases:
-            hits = await retrieval.search(case.question, limit=1)
+            route = router.route(case.question)
+            hits = await retrieval.search(
+                case.question,
+                limit=1,
+                route=route,
+            )
             score = None
             if hits:
                 score = (
@@ -133,6 +146,7 @@ async def _calibrate(args: argparse.Namespace) -> None:
                     top_rerank_score=score,
                 )
             )
+            route_details[case.id] = route.model_dump(mode="json")
     finally:
         await qdrant.close()
 
@@ -163,6 +177,7 @@ async def _calibrate(args: argparse.Namespace) -> None:
                     {
                         "id": sample.case_id,
                         "answerable": sample.answerable,
+                        "route": route_details[sample.case_id],
                         "top_rerank_score": (
                             round(sample.top_rerank_score, 6)
                             if sample.top_rerank_score is not None
