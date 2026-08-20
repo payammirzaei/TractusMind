@@ -1,4 +1,5 @@
 from dataclasses import asdict
+from time import perf_counter
 
 import structlog
 from qdrant_client import AsyncQdrantClient
@@ -12,6 +13,12 @@ from app.infra.redis import create_redis_client
 from app.ingestion.pipeline import SourceIngestionPipeline
 from app.ingestion.registry import get_source
 from app.ingestion.sync import IncrementalSourceSync
+from app.observability.metrics import (
+    INGESTION_DURATION,
+    INGESTION_FILES,
+    INGESTION_LOCK_CONTENTION,
+    INGESTION_RUNS,
+)
 from app.retrieval.factory import create_hybrid_retrieval_service
 from app.state.store import SourceStateStore
 
@@ -25,6 +32,7 @@ async def run_source_sync(
 ) -> dict[str, object]:
     """Run one source sync with a distributed per-source Redis lock."""
 
+    started = perf_counter()
     resolved_settings = settings or get_settings()
     source = get_source(source_id)
     redis = create_redis_client(resolved_settings)
@@ -35,6 +43,9 @@ async def run_source_sync(
     )
     acquired = await lock.acquire(blocking=False)
     if not acquired:
+        INGESTION_LOCK_CONTENTION.labels(source_id=source_id).inc()
+        INGESTION_RUNS.labels(source_id=source_id, status="locked").inc()
+        INGESTION_DURATION.labels(source_id=source_id).observe(perf_counter() - started)
         await redis.aclose()
         logger.info("source_sync_skipped_locked", source_id=source_id)
         return {"status": "locked", "source_id": source_id}
@@ -56,10 +67,23 @@ async def run_source_sync(
             )
             result = await sync.sync(source)
 
+        INGESTION_RUNS.labels(source_id=source_id, status="succeeded").inc()
+        for change, count in (
+            ("added", result.added_count),
+            ("modified", result.modified_count),
+            ("deleted", result.deleted_count),
+            ("unchanged", result.unchanged_count),
+        ):
+            INGESTION_FILES.labels(source_id=source_id, change=change).inc(count)
+
         payload = {"status": "succeeded", **asdict(result)}
         logger.info("source_sync_succeeded", **payload)
         return payload
+    except Exception:
+        INGESTION_RUNS.labels(source_id=source_id, status="failed").inc()
+        raise
     finally:
+        INGESTION_DURATION.labels(source_id=source_id).observe(perf_counter() - started)
         if qdrant is not None:
             await qdrant.close()
         if engine is not None:
