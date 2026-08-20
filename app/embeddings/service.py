@@ -23,10 +23,7 @@ class DenseEmbeddingService:
 
     @cached_property
     def dimension(self) -> int:
-        for model in TextEmbedding.list_supported_models():
-            if model.get("model") == self.model_name:
-                return int(model["dim"])
-        raise RuntimeError(f"FastEmbed model is not registered: {self.model_name}")
+        return int(TextEmbedding.get_embedding_size(self.model_name))
 
     async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
         if not texts:
