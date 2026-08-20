@@ -32,11 +32,16 @@ export type OIDCServerConfig = {
 
 let cachedDiscovery: { issuer: string; expiresAt: number; value: OIDCDiscovery } | null = null;
 
+function enabledFlag(value: string | undefined) {
+  return ["1", "true", "yes", "on"].includes((value ?? "").trim().toLowerCase());
+}
+
 export function oidcConfig(): OIDCServerConfig {
   const issuerUrl = (process.env.TRACTUSMIND_OIDC_ISSUER_URL ?? "").trim().replace(/\/$/, "");
   const clientId = (process.env.TRACTUSMIND_OIDC_CLIENT_ID ?? "").trim();
+  const explicitlyEnabled = enabledFlag(process.env.TRACTUSMIND_OIDC_ENABLED);
   return {
-    enabled: Boolean(issuerUrl && clientId),
+    enabled: explicitlyEnabled && Boolean(issuerUrl && clientId),
     issuerUrl,
     clientId,
     scopes: (process.env.TRACTUSMIND_OIDC_SCOPES ?? "openid profile email").trim() || "openid profile email",
