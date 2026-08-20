@@ -71,7 +71,7 @@ const AUTH_ERRORS: Record<string, string> = {
   identity_rejected: "The signed-in identity was rejected by TractusMind access policy.",
 };
 
-function LoginConsole({ onReady }: { onReady: (identity: Identity) => void }) {
+function LoginConsole({ onReady, returnTo }: { onReady: (identity: Identity) => void; returnTo: string }) {
   const [token, setToken] = useState("");
   const [pending, setPending] = useState(false);
   const [ssoEnabled, setSsoEnabled] = useState(false);
@@ -125,7 +125,7 @@ function LoginConsole({ onReady }: { onReady: (identity: Identity) => void }) {
           <p className="mt-4 text-sm leading-6 text-slate-500">Enterprise identities and API keys converge on the same backend-validated, HttpOnly Mission Control session.</p>
 
           {ssoEnabled && <div className="mt-8">
-            <a href="/api/oidc/login?return_to=%2F" className="tm-control flex h-12 w-full items-center justify-center gap-3 rounded-xl border-cyan-300/15 text-sm font-semibold text-cyan-100 hover:border-cyan-300/30"><ShieldCheck className="size-4 text-cyan-300"/>Continue with Enterprise SSO<ArrowRight className="size-4 text-slate-600"/></a>
+            <a href={`/api/oidc/login?return_to=${encodeURIComponent(returnTo || "/")}`} className="tm-control flex h-12 w-full items-center justify-center gap-3 rounded-xl border-cyan-300/15 text-sm font-semibold text-cyan-100 hover:border-cyan-300/30"><ShieldCheck className="size-4 text-cyan-300"/>Continue with Enterprise SSO<ArrowRight className="size-4 text-slate-600"/></a>
             <div className="mt-3 text-center text-[10px] leading-5 text-slate-600">Authorization Code + PKCE · backend role validation · no browser token storage</div>
             <div className="my-6 flex items-center gap-3"><span className="h-px flex-1 bg-white/5"/><span className="tm-label">API key fallback</span><span className="h-px flex-1 bg-white/5"/></div>
           </div>}
@@ -208,8 +208,39 @@ export function MissionControl({ view }: { view: MissionView }) {
   const [commandQuery, setCommandQuery] = useState("");
 
   useEffect(() => {
-    fetch("/api/session", { cache: "no-store" }).then(async (response) => response.ok ? setIdentity(await response.json()) : setIdentity(null)).finally(() => setLoading(false));
+    fetch("/api/session", { cache: "no-store" })
+      .then(async (response) => response.ok ? setIdentity(await response.json()) : setIdentity(null))
+      .catch(() => setIdentity(null))
+      .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!identity) return;
+    let cancelled = false;
+
+    async function revalidateIdentity() {
+      try {
+        const response = await fetch("/api/session", { cache: "no-store" });
+        if (cancelled) return;
+        if (response.ok) {
+          setIdentity(await response.json() as Identity);
+        } else if (response.status === 401 || response.status === 403) {
+          setIdentity(null);
+        }
+      } catch {
+        // Keep the last validated identity during transient frontend/API outages.
+      }
+    }
+
+    const onFocus = () => void revalidateIdentity();
+    const timer = window.setInterval(() => void revalidateIdentity(), 60_000);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [identity?.user_id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -232,13 +263,14 @@ export function MissionControl({ view }: { view: MissionView }) {
     function onKeyDown(event: KeyboardEvent) {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
+        event.stopImmediatePropagation();
         setCommandQuery("");
         setCommandOpen((value) => !value);
       }
       if (event.key === "Escape") setCommandOpen(false);
     }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
   }, []);
 
   async function logout() {
@@ -247,7 +279,7 @@ export function MissionControl({ view }: { view: MissionView }) {
   }
 
   if (loading) return <BootPanel />;
-  if (!identity) return <LoginConsole onReady={setIdentity} />;
+  if (!identity) return <LoginConsole onReady={setIdentity} returnTo={pathname || "/"} />;
 
   const permitted = NAV.filter((item) => roleRank[identity.role] >= roleRank[item.minimum]);
   if (!permitted.some((item) => item.view === view)) {
