@@ -59,7 +59,11 @@ def is_relevant(case: BenchmarkCase, hit: RetrievalHit) -> bool:
     return all(term.casefold() in searchable for term in case.expected_terms)
 
 
-def evaluate_case(case: BenchmarkCase, hits: list[RetrievalHit], k: int) -> tuple[int, float, float]:
+def evaluate_case(
+    case: BenchmarkCase,
+    hits: list[RetrievalHit],
+    k: int,
+) -> tuple[int, float, float]:
     ranked = hits[:k]
     relevant_ranks = [rank for rank, hit in enumerate(ranked, start=1) if is_relevant(case, hit)]
     if not relevant_ranks:
