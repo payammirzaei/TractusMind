@@ -16,6 +16,8 @@ inspectability, and measurable evaluation come before UI work.
 - structure-aware Markdown/code/YAML/Turtle chunking
 - OpenAI-compatible grounded generation
 - backend-owned citations + atomic claim verification
+- bounded LLM/GitHub retries + process-shared circuit breakers
+- stable LLM idempotency key across transient retries
 - PostgreSQL incremental-ingestion state
 - Redis + Dramatiq background source synchronization
 - Prometheus metrics + optional OpenTelemetry traces
@@ -69,26 +71,17 @@ Current chain:
 Useful commands:
 
 ```bash
-# Recommended deployment path; handles fresh, versioned, or complete legacy DBs
 tractusmind-db bootstrap
-
-# Normal versioned upgrade
 tractusmind-db upgrade
-
-# Verify DB matches this application build
 tractusmind-db check
-
-# Inspect revision state
+tractusmind-db drift
 tractusmind-db current
 tractusmind-db history
-
-# Explicit rollback; back up production first
 tractusmind-db downgrade 0001_core_schema
 ```
 
-`bootstrap` fails closed on partial legacy schemas instead of guessing around production data.
-The API verifies the Alembic head during startup, and background ingestion verifies it before
-source-state work begins.
+`bootstrap` handles fresh, versioned, or complete pre-Alembic TractusMind databases and fails
+closed on partial legacy schemas. `drift` fails if ORM metadata differs from the migrated schema.
 
 See [`docs/database-migrations.md`](docs/database-migrations.md).
 
@@ -118,14 +111,6 @@ unchanged
 
 Only added and modified files are downloaded, chunked, embedded, and upserted. Unchanged files
 receive metadata-only snapshot updates; deleted paths are removed.
-
-PostgreSQL tracks:
-
-```text
-source_state
-source_file_state
-ingestion_run
-```
 
 Snapshot provenance distinguishes:
 
@@ -196,25 +181,8 @@ error / exception / symbol / config / path
   -> cross-encoder reranking
 ```
 
-Debug parsing recognizes quoted messages, exception classes, CamelCase/snake_case identifiers,
-dotted config keys, paths, environment-style identifiers, and HTTP 4xx/5xx codes.
-
-Every retrieval hit can preserve:
-
-```text
-source_id
-repository
-version_ref
-snapshot_commit_sha
-commit_sha
-path
-line range
-source URL
-retrieval_score
-rerank_score
-debug_score
-retrieval_methods
-```
+Every retrieval hit can preserve source/repository/version/snapshot/content-commit/path/line
+provenance plus retrieval, rerank, debug, and retrieval-method scores.
 
 ## Grounded answer generation
 
@@ -224,17 +192,6 @@ Configure any OpenAI-compatible chat-completions endpoint:
 LLM_BASE_URL=https://provider.example/v1
 LLM_API_KEY=...
 LLM_MODEL=...
-```
-
-Query:
-
-```http
-POST /v1/ask
-Content-Type: application/json
-
-{
-  "question": "How do I create an asset with the Tractus-X SDK?"
-}
 ```
 
 Production path:
@@ -253,6 +210,37 @@ question
 
 Evidence IDs such as `[S1]` are owned by the backend. The model cannot invent repository URLs,
 source IDs, refs, commits, paths, or line numbers. Unsupported claims fail closed.
+
+## Provider resilience
+
+LLM and GitHub are treated as unreliable external boundaries. Transient failures use bounded
+exponential backoff with jitter; permanent client/auth errors fail immediately.
+
+Defaults:
+
+```bash
+GITHUB_TIMEOUT_SECONDS=30
+GITHUB_MAX_ATTEMPTS=4
+LLM_TIMEOUT_SECONDS=60
+LLM_MAX_ATTEMPTS=3
+PROVIDER_RETRY_BASE_SECONDS=0.5
+PROVIDER_RETRY_MAX_SECONDS=8
+PROVIDER_CIRCUIT_FAILURE_THRESHOLD=3
+PROVIDER_CIRCUIT_COOLDOWN_SECONDS=30
+```
+
+LLM retries transport failures/timeouts and `408/429/500/502/503/504`. GitHub retries transport
+failures, `429/5xx`, and only those `403` responses identifiable as rate limiting.
+
+One `Idempotency-Key` is generated per logical LLM call and reused across all retries. Compatible
+providers can therefore deduplicate ambiguous timeout retries; arbitrary OpenAI-compatible
+providers that ignore the header cannot be guaranteed to deduplicate them.
+
+Circuit breakers are shared within each process. After repeated logical transient failures they
+open and reject new calls until cooldown, then allow one half-open probe. This prevents a failing
+provider from causing a local retry storm.
+
+See [`docs/provider-resilience.md`](docs/provider-resilience.md).
 
 ## Authenticated user-owned conversations
 
@@ -284,9 +272,8 @@ HISTORY_MAX_TURNS=6
 HISTORY_MAX_CHARS=6000
 ```
 
-History is context, **not source evidence**. Previous assistant answers cannot be cited. A true
-follow-up may reuse the previous user question to improve retrieval, while current claims are still
-verified only against current source evidence.
+History is context, **not source evidence**. Previous assistant answers cannot be cited. Current
+claims are still verified only against current source evidence.
 
 See [`docs/authenticated-conversations.md`](docs/authenticated-conversations.md) and
 [`docs/conversation-feedback.md`](docs/conversation-feedback.md).
@@ -308,97 +295,35 @@ user down-vote -------+          ↓
                                       CI/eval gate
 ```
 
-Root-cause classes include routing, retrieval, citation, generation, verification, source data,
-and versioning. Raw feedback never becomes a gold benchmark automatically.
-
-Reviewed regression files live under:
-
-```text
-benchmarks/regressions/retrieval.jsonl
-benchmarks/regressions/debug.jsonl
-benchmarks/regressions/answer.jsonl
-```
+Raw feedback never becomes a gold benchmark automatically. Reviewed regression files live under
+`benchmarks/regressions/` and remain human-approved artifacts.
 
 See [`docs/quality-loop.md`](docs/quality-loop.md).
 
 ## Evaluation and production quality gate
 
-General retrieval benchmark:
-
 ```bash
 tractusmind-benchmark --mode all --k 5
-```
-
-Debug retrieval benchmark:
-
-```bash
-tractusmind-benchmark \
-  --dataset benchmarks/debug_v0.jsonl \
-  --mode rerank \
-  --k 5
-```
-
-Answer evaluation and threshold calibration:
-
-```bash
 tractusmind-answer-eval evaluate
 tractusmind-answer-eval calibrate --max-unsafe-rate 0
-```
-
-Quality contract enforcement:
-
-```bash
 tractusmind-quality-gate \
   --calibration calibration.json \
   --answer answer.json \
   --require-pinned-threshold
 ```
 
-Hard invariants currently require:
-
-```text
-unsafe answer rate              = 0
-unsafe evidence acceptance rate = 0
-reviewed retrieval regressions  = 100% pass
-reviewed debug regressions      = 100% pass
-reviewed answer regressions     = 100% pass
-```
-
-Aggregate seed MRR/NDCG/recall remain report-only until a measured full-corpus baseline is pinned.
+Hard invariants currently require zero unsafe answer/evidence acceptance and 100% pass for reviewed
+retrieval, debug, and answer regressions. Aggregate seed MRR/NDCG/recall remain report-only until a
+measured full-corpus baseline is pinned.
 
 See [`docs/quality-gate.md`](docs/quality-gate.md).
 
 ## Operations API
 
-Configure:
+Configure `OPS_ADMIN_KEY` and send it as `X-TractusMind-Admin-Key`.
 
-```bash
-OPS_ADMIN_KEY=replace-with-a-long-random-secret
-```
-
-Send:
-
-```http
-X-TractusMind-Admin-Key: replace-with-a-long-random-secret
-```
-
-Protected operations include:
-
-```text
-GET  /v1/ops/summary
-GET  /v1/ops/sources
-GET  /v1/ops/runs
-GET  /v1/ops/interactions
-GET  /v1/ops/users
-GET  /v1/ops/quality/summary
-GET  /v1/ops/quality/reviews
-GET  /v1/ops/quality/regressions
-POST /v1/ops/sources/{source_id}/sync
-POST /v1/ops/sync
-POST /v1/ops/users
-POST /v1/ops/users/{user_id}/rotate
-PATCH /v1/ops/users/{user_id}
-```
+Protected operations cover source/run state, interactions, users, quality reviews/regressions, and
+manual source-sync enqueue controls.
 
 See [`docs/operations.md`](docs/operations.md).
 
@@ -413,16 +338,17 @@ worker:9191/
 scheduler:9102/metrics
 ```
 
-TractusMind records HTTP latency, retrieval/rerank/generation/verification latency, model warm-up,
-ingestion duration/outcomes, queue state, lock contention, and answer outcomes. Every normal API
-response receives `X-Request-ID` for log correlation.
+TractusMind records HTTP and pipeline latency, model warm-up, ingestion state, queue/lock state,
+answer outcomes, provider retries/delays, and provider circuit events. Every normal API response
+receives `X-Request-ID` for log correlation.
 
-Optional OTLP traces:
+Provider metric families include:
 
-```bash
-OTEL_TRACES_ENDPOINT=http://otel-collector:4318/v1/traces
-OTEL_SERVICE_NAME=tractusmind-api
-OTEL_SAMPLE_RATIO=1.0
+```text
+tractusmind_provider_requests_total
+tractusmind_provider_retries_total
+tractusmind_provider_retry_delay_seconds
+tractusmind_provider_circuit_open_total
 ```
 
 See [`docs/observability.md`](docs/observability.md).
@@ -441,12 +367,12 @@ identity / anonymous
   -> fusion + rerank scores
   -> evidence threshold
   -> final source evidence
+  -> bounded provider request/retry path
   -> answer
   -> citations
   -> claim/evidence verdicts
   -> persisted interaction + timings + trace ID
-  -> optional feedback
-  -> optional human review
+  -> optional feedback/review
   -> reviewed regression gate
 ```
 
@@ -454,7 +380,7 @@ See [`docs/architecture.md`](docs/architecture.md).
 
 ## Current milestone
 
-**V16 — Versioned Database Migrations + Production Schema Upgrade**
+**V17 — Provider Resilience**
 
 Completed:
 
@@ -464,15 +390,16 @@ Completed:
 - [x] incremental PostgreSQL/Qdrant source synchronization
 - [x] background scheduler/worker + distributed locks
 - [x] operations API and production observability
-- [x] persisted conversations, answer traces, feedback, and quality reviews
-- [x] human-reviewed regression promotion and benchmark export
+- [x] persisted conversations, feedback, and human-reviewed quality loop
 - [x] production quality-gate CLI/workflow
 - [x] opaque bearer users and owned bounded conversation history
-- [x] Alembic revision chain with upgrade/downgrade support
-- [x] safe adoption of complete pre-Alembic legacy databases
-- [x] fail-fast API/worker database revision guard
-- [x] Compose migration-before-service startup
-- [x] PostgreSQL CI migration, legacy-adoption, rollback, and re-upgrade smoke tests
+- [x] Alembic versioned schema + legacy bootstrap + ORM drift gate
+- [x] bounded LLM/GitHub transient retry with exponential backoff and jitter
+- [x] Retry-After and GitHub rate-limit-aware delay handling
+- [x] process-shared provider circuit breakers with half-open probe
+- [x] stable LLM Idempotency-Key across retries
+- [x] provider retry/circuit Prometheus metrics
+- [x] provider resilience regression tests using deterministic HTTP transports
 
 Still measured/production-dependent:
 
