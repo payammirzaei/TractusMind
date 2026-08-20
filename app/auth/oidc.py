@@ -58,12 +58,12 @@ class OIDCAuthenticator:
             raise OIDCAuthenticationError("JWT header is missing kid")
 
         metadata, jwks = await self._configuration()
-        key = self._find_key(jwks, kid)
+        key = self._find_key(jwks, kid, algorithm)
         if key is None:
             metadata, jwks = await self._configuration(force=True)
-            key = self._find_key(jwks, kid)
+            key = self._find_key(jwks, kid, algorithm)
         if key is None:
-            raise OIDCAuthenticationError("No matching JWKS key")
+            raise OIDCAuthenticationError("No matching JWKS signing key")
 
         options = {
             "require": ["exp", "iss", "sub"],
@@ -163,13 +163,23 @@ class OIDCAuthenticator:
             raise OIDCProviderError("OIDC provider URLs must use HTTPS outside development")
 
     @staticmethod
-    def _find_key(jwks: dict[str, Any], kid: str) -> dict[str, Any] | None:
+    def _find_key(
+        jwks: dict[str, Any],
+        kid: str,
+        algorithm: str,
+    ) -> dict[str, Any] | None:
         keys = jwks.get("keys")
         if not isinstance(keys, list):
             return None
         for key in keys:
-            if isinstance(key, dict) and key.get("kid") == kid:
-                return key
+            if not isinstance(key, dict) or key.get("kid") != kid:
+                continue
+            if key.get("use") not in {None, "sig"}:
+                continue
+            key_algorithm = key.get("alg")
+            if key_algorithm is not None and key_algorithm != algorithm:
+                continue
+            return key
         return None
 
     def _resolve_role(self, claims: dict[str, Any]) -> UserRole:
