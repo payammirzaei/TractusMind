@@ -14,6 +14,7 @@ from app.core.config import get_settings
 from app.generation.factory import create_grounded_answer_service
 from app.generation.llm import LLMConfigurationError, LLMGenerationError
 from app.generation.models import GroundedAnswer
+from app.observability.metrics import QUALITY_REVIEW_SIGNALS
 from app.observability.trace_context import (
     begin_answer_trace,
     current_trace_id,
@@ -167,6 +168,7 @@ async def _finish_and_persist_failure(
             interaction_id=identity.interaction_id,
             trigger="failure",
         )
+        QUALITY_REVIEW_SIGNALS.labels(trigger="failure").inc()
     except Exception as exc:
         logger.exception(
             "quality_review_capture_failed",
