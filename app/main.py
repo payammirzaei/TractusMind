@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -6,12 +7,15 @@ from fastapi import FastAPI
 
 from app.api.routes.ask import router as ask_router
 from app.api.routes.health import router as health_router
+from app.api.routes.metrics import router as metrics_router
 from app.api.routes.ops import router as ops_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.infra.postgres import create_postgres_engine
 from app.infra.qdrant import create_qdrant_client
 from app.infra.redis import create_redis_client
+from app.observability.http import observe_http_request
+from app.observability.tracing import configure_tracing
 
 settings = get_settings()
 configure_logging(settings.log_level)
@@ -33,6 +37,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await app.state.postgres.dispose()
     await app.state.redis.aclose()
     await app.state.qdrant.close()
+    if app.state.tracer_provider is not None:
+        await asyncio.to_thread(app.state.tracer_provider.shutdown)
     logger.info("application_stopped")
 
 
@@ -45,6 +51,9 @@ app = FastAPI(
 app.include_router(health_router)
 app.include_router(ask_router)
 app.include_router(ops_router)
+app.include_router(metrics_router)
+app.middleware("http")(observe_http_request)
+app.state.tracer_provider = configure_tracing(app, settings)
 
 
 @app.get("/", tags=["system"])
