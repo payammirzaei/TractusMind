@@ -29,6 +29,11 @@ class SourceOpsStatus(BaseModel):
     file_count: int = Field(default=0, ge=0)
     last_successful_run_id: str | None = None
     updated_at: datetime | None = None
+    latest_run_id: str | None = None
+    latest_run_status: str | None = None
+    latest_run_started_at: datetime | None = None
+    latest_run_finished_at: datetime | None = None
+    latest_run_error: str | None = None
     locked: bool = False
 
 
@@ -57,6 +62,8 @@ class OpsSummary(BaseModel):
     enabled_sources: int
     indexed_sources: int
     locked_sources: int
+    running_sources: int
+    failed_sources: int
     scheduler_interval_seconds: int
     redis_ok: bool
     run_status_counts: dict[str, int]
@@ -90,11 +97,16 @@ def _run_response(run: IngestionRunRecord) -> RunOpsStatus:
 
 async def _source_responses(request: Request) -> list[SourceOpsStatus]:
     store = await _store(request)
+    registry = load_source_registry()
     persisted = {item.source_id: item for item in await store.list_source_statuses()}
-    responses: list[SourceOpsStatus] = []
+    latest_runs: dict[str, IngestionRunRecord] = {}
+    for run in await store.list_runs(limit=max(50, len(registry) * 5)):
+        latest_runs.setdefault(run.source_id, run)
 
-    for source in load_source_registry():
+    responses: list[SourceOpsStatus] = []
+    for source in registry:
         state = persisted.get(source.id)
+        latest = latest_runs.get(source.id)
         responses.append(
             SourceOpsStatus(
                 source_id=source.id,
@@ -108,6 +120,11 @@ async def _source_responses(request: Request) -> list[SourceOpsStatus]:
                 file_count=state.file_count if state else 0,
                 last_successful_run_id=(state.last_successful_run_id if state else None),
                 updated_at=state.updated_at if state else None,
+                latest_run_id=latest.run_id if latest else None,
+                latest_run_status=latest.status if latest else None,
+                latest_run_started_at=latest.started_at if latest else None,
+                latest_run_finished_at=latest.finished_at if latest else None,
+                latest_run_error=latest.error_message if latest else None,
                 locked=await _is_locked(request, source.id),
             )
         )
@@ -133,6 +150,8 @@ async def summary(request: Request) -> OpsSummary:
         enabled_sources=sum(item.enabled for item in sources),
         indexed_sources=sum(item.snapshot_commit_sha is not None for item in sources),
         locked_sources=sum(item.locked for item in sources),
+        running_sources=sum(item.latest_run_status == "running" for item in sources),
+        failed_sources=sum(item.latest_run_status == "failed" for item in sources),
         scheduler_interval_seconds=get_settings().source_sync_interval_seconds,
         redis_ok=redis_ok,
         run_status_counts=await store.run_status_counts(),
