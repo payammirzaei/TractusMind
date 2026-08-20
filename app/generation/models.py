@@ -1,5 +1,7 @@
 from pydantic import BaseModel, Field
 
+from app.routing.models import QueryRoute
+
 
 class AnswerCitation(BaseModel):
     citation_id: str
@@ -7,6 +9,7 @@ class AnswerCitation(BaseModel):
     source_id: str
     repository: str
     component: str
+    version_ref: str | None = None
     commit_sha: str
     path: str
     start_line: int = Field(ge=1)
@@ -38,6 +41,7 @@ class GroundedAnswer(BaseModel):
     evidence_count: int = Field(ge=0)
     citations: list[AnswerCitation] = Field(default_factory=list)
     verification: VerificationReport | None = None
+    route: QueryRoute | None = None
     model: str | None = None
 
 
