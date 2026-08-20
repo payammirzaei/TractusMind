@@ -20,18 +20,36 @@ class DenseRetrievalService:
         self.embedder = embedder
         self.store = QdrantKnowledgeStore(qdrant, collection_name)
 
-    async def index(self, chunks: Sequence[KnowledgeChunk]) -> int:
+    async def index(
+        self,
+        chunks: Sequence[KnowledgeChunk],
+        *,
+        remove_stale_source_versions: bool = False,
+    ) -> int:
         if not chunks:
             return 0
+
+        source_ids = {chunk.source_id for chunk in chunks}
+        commit_shas = {chunk.commit_sha for chunk in chunks}
+        if remove_stale_source_versions and (len(source_ids) != 1 or len(commit_shas) != 1):
+            raise ValueError("Stale-version cleanup requires chunks from one source and one commit")
 
         await self.store.ensure_collection(self.embedder.dimension)
         embedding_texts = [build_embedding_text(chunk) for chunk in chunks]
         vectors = await self.embedder.embed_documents(embedding_texts)
-        return await self.store.upsert_chunks(
+        indexed = await self.store.upsert_chunks(
             chunks,
             vectors,
             embedding_model=self.embedder.model_name,
         )
+
+        if remove_stale_source_versions:
+            await self.store.remove_stale_source_versions(
+                source_id=next(iter(source_ids)),
+                current_commit_sha=next(iter(commit_shas)),
+            )
+
+        return indexed
 
     async def search(
         self,
