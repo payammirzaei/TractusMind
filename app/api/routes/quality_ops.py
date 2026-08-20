@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from pydantic import BaseModel, Field
 
 from app.api.ops_auth import require_ops_admin
-from app.quality.store import RegressionRecord, ReviewRecord
+from app.quality.store import RegressionRecord, ReviewRecord, ReviewStateError
 
 router = APIRouter(
     prefix="/v1/ops/quality",
@@ -139,11 +139,14 @@ async def decide_review(
     request: Request,
 ) -> ReviewResponse | RegressionResponse:
     if payload.action == "dismiss":
-        record = await request.app.state.quality_store.dismiss_review(
-            review_id=str(review_id),
-            root_cause=payload.root_cause,
-            reviewer_note=payload.reviewer_note,
-        )
+        try:
+            record = await request.app.state.quality_store.dismiss_review(
+                review_id=str(review_id),
+                root_cause=payload.root_cause,
+                reviewer_note=payload.reviewer_note,
+            )
+        except ReviewStateError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         if record is None:
             raise HTTPException(status_code=404, detail="Unknown quality review")
         return _review(record)
@@ -166,15 +169,18 @@ async def decide_review(
             detail="Promoted answerable cases require expected evidence",
         )
 
-    case = await request.app.state.quality_store.promote_review(
-        review_id=str(review_id),
-        root_cause=payload.root_cause,
-        reviewer_note=payload.reviewer_note,
-        benchmark_kind=payload.benchmark_kind,
-        expected_source_ids=payload.expected_source_ids,
-        expected_terms=payload.expected_terms,
-        expected_abstain=payload.expected_abstain,
-    )
+    try:
+        case = await request.app.state.quality_store.promote_review(
+            review_id=str(review_id),
+            root_cause=payload.root_cause,
+            reviewer_note=payload.reviewer_note,
+            benchmark_kind=payload.benchmark_kind,
+            expected_source_ids=payload.expected_source_ids,
+            expected_terms=payload.expected_terms,
+            expected_abstain=payload.expected_abstain,
+        )
+    except ReviewStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if case is None:
         raise HTTPException(status_code=404, detail="Unknown quality review")
     return _regression(case)
