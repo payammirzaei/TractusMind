@@ -1,0 +1,12 @@
+{"id":"sdk-create-asset","category":"coding","question":"How do I create an asset with the Tractus-X SDK?","expected_sources":["tractusx-sdk"],"expected_terms":["create_asset"]}
+{"id":"sdk-contract-negotiation","category":"coding","question":"Show me how to start a contract negotiation with the Tractus-X SDK.","expected_sources":["tractusx-sdk"],"expected_terms":["contract","negotiation"]}
+{"id":"edc-control-data-plane","category":"concept","question":"What is the difference between the EDC control plane and data plane?","expected_sources":["tractusx-edc"],"expected_terms":["Control-Plane","Data-Plane"]}
+{"id":"edc-management-policy","category":"how-to","question":"Where are policies configured or managed in Tractus-X EDC?","expected_sources":["tractusx-edc"],"expected_terms":["policy"]}
+{"id":"dtr-shell-descriptor","category":"coding","question":"How can I create an AAS shell descriptor for the Digital Twin Registry?","expected_sources":["tractusx-sdk","digital-twin-registry"],"expected_terms":["ShellDescriptor"]}
+{"id":"sdk-discovery-bpn","category":"coding","question":"How do I discover a connector by BPN?","expected_sources":["tractusx-sdk"],"expected_terms":["find_connector_by_bpn"]}
+{"id":"semantic-samm","category":"semantic-model","question":"Where are the Tractus-X SAMM semantic models defined?","expected_sources":["semantic-models"],"expected_terms":["samm"]}
+{"id":"sdk-dataspace-consume","category":"how-to","question":"How can an application consume data from a dataspace using the Tractus-X SDK?","expected_sources":["tractusx-sdk"],"expected_terms":["consumer","connector"]}
+{"id":"edc-build","category":"coding","question":"How do I build the Tractus-X EDC container images?","expected_sources":["tractusx-edc"],"expected_terms":["gradlew","dockerize"]}
+{"id":"version-traceability","category":"version","question":"Which source version or commit does this Tractus-X implementation come from?","expected_sources":["tractusx-sdk","tractusx-edc"],"expected_terms":[]}
+{"id":"docs-business-partner-bpn","category":"documentation","question":"How does the Tractus-X Business Partner KIT describe the Business Partner Number?","expected_sources":["tractusx-docs"],"expected_terms":["business partner number","BPN"]}
+{"id":"release-calendar-versioning","category":"release","question":"What versioning scheme does Tractus-X use for overarching quarterly releases?","expected_sources":["tractusx-release"],"expected_terms":["Calendar Versioning","YY.0M.MICRO"]}
