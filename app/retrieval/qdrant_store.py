@@ -28,26 +28,29 @@ class QdrantKnowledgeStore:
 
     async def ensure_collection(self, dimension: int, *, hybrid: bool = False) -> None:
         exists = await self.client.collection_exists(self.collection_name)
-        if exists:
-            return
+        if not exists:
+            sparse_config = None
+            if hybrid:
+                sparse_config = {
+                    SPARSE_VECTOR_NAME: models.SparseVectorParams(
+                        modifier=models.Modifier.IDF
+                    )
+                }
 
-        sparse_config = None
-        if hybrid:
-            sparse_config = {
-                SPARSE_VECTOR_NAME: models.SparseVectorParams(modifier=models.Modifier.IDF)
-            }
+            await self.client.create_collection(
+                collection_name=self.collection_name,
+                vectors_config={
+                    DENSE_VECTOR_NAME: models.VectorParams(
+                        size=dimension,
+                        distance=models.Distance.COSINE,
+                    )
+                },
+                sparse_vectors_config=sparse_config,
+            )
 
-        await self.client.create_collection(
-            collection_name=self.collection_name,
-            vectors_config={
-                DENSE_VECTOR_NAME: models.VectorParams(
-                    size=dimension,
-                    distance=models.Distance.COSINE,
-                )
-            },
-            sparse_vectors_config=sparse_config,
-        )
+        await self._ensure_payload_indexes()
 
+    async def _ensure_payload_indexes(self) -> None:
         for field in (
             "source_id",
             "repository",
@@ -58,6 +61,8 @@ class QdrantKnowledgeStore:
             "language",
             "kind",
             "path",
+            "symbol",
+            "parent_symbol",
         ):
             await self.client.create_payload_index(
                 collection_name=self.collection_name,
@@ -65,6 +70,18 @@ class QdrantKnowledgeStore:
                 field_schema=models.PayloadSchemaType.KEYWORD,
                 wait=True,
             )
+
+        await self.client.create_payload_index(
+            collection_name=self.collection_name,
+            field_name="debug_text",
+            field_schema=models.TextIndexParams(
+                type=models.TextIndexType.TEXT,
+                tokenizer=models.TokenizerType.WHITESPACE,
+                lowercase=True,
+                phrase_matching=True,
+            ),
+            wait=True,
+        )
 
     async def upsert_chunks(
         self,
@@ -112,7 +129,11 @@ class QdrantKnowledgeStore:
 
         return indexed
 
-    async def remove_stale_source_versions(self, source_id: str, current_commit_sha: str) -> None:
+    async def remove_stale_source_versions(
+        self,
+        source_id: str,
+        current_commit_sha: str,
+    ) -> None:
         await self.client.delete(
             collection_name=self.collection_name,
             points_selector=models.FilterSelector(
@@ -151,7 +172,7 @@ class QdrantKnowledgeStore:
             score_threshold=score_threshold,
             with_payload=True,
         )
-        return self._hits(result.points)
+        return self._hits(result.points, method="dense")
 
     async def hybrid_search(
         self,
@@ -181,39 +202,123 @@ class QdrantKnowledgeStore:
             limit=limit,
             with_payload=True,
         )
-        return self._hits(result.points)
+        return self._hits(result.points, method="hybrid")
 
-    def _hits(self, points: Sequence[object]) -> list[RetrievalHit]:
+    async def debug_search(
+        self,
+        conditions: Sequence[tuple[models.FieldCondition, float, str]],
+        *,
+        query_filter: models.Filter | None = None,
+        limit: int = 30,
+        per_condition_limit: int = 20,
+    ) -> list[RetrievalHit]:
+        aggregated: dict[str, dict[str, object]] = {}
+
+        for condition, weight, method in conditions:
+            points, _ = await self.client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=self._merge_filter(query_filter, condition),
+                limit=per_condition_limit,
+                with_payload=True,
+                with_vectors=False,
+            )
+            for point in points:
+                payload = point.payload or {}
+                chunk_id = str(payload.get("chunk_id", point.id))
+                entry = aggregated.setdefault(
+                    chunk_id,
+                    {
+                        "payload": payload,
+                        "score": 0.0,
+                        "methods": set(),
+                    },
+                )
+                entry["score"] = float(entry["score"]) + weight
+                methods = entry["methods"]
+                if isinstance(methods, set):
+                    methods.add(method)
+
+        hits = [
+            self._hit_from_payload(
+                entry["payload"],
+                score=float(entry["score"]),
+                debug_score=float(entry["score"]),
+                methods=sorted(entry["methods"]),
+            )
+            for entry in aggregated.values()
+            if isinstance(entry["payload"], dict)
+            and isinstance(entry["methods"], set)
+        ]
+        hits.sort(
+            key=lambda hit: (
+                hit.debug_score if hit.debug_score is not None else 0.0,
+                hit.chunk_id,
+            ),
+            reverse=True,
+        )
+        return hits[:limit]
+
+    def _merge_filter(
+        self,
+        base: models.Filter | None,
+        condition: models.FieldCondition,
+    ) -> models.Filter:
+        if base is None:
+            return models.Filter(must=[condition])
+        return models.Filter(must=[base, condition])
+
+    def _hits(
+        self,
+        points: Sequence[object],
+        *,
+        method: str,
+    ) -> list[RetrievalHit]:
         hits: list[RetrievalHit] = []
         for point in points:
             payload = point.payload or {}  # type: ignore[attr-defined]
             hits.append(
-                RetrievalHit(
-                    chunk_id=str(payload["chunk_id"]),
+                self._hit_from_payload(
+                    payload,
                     score=float(point.score),  # type: ignore[attr-defined]
-                    text=str(payload["text"]),
-                    source_id=str(payload["source_id"]),
-                    repository=str(payload["repository"]),
-                    component=str(payload["component"]),
-                    version_ref=(
-                        str(payload["version_ref"]) if payload.get("version_ref") else None
-                    ),
-                    commit_sha=str(payload["commit_sha"]),
-                    path=str(payload["path"]),
-                    content_type=str(payload["content_type"]),
-                    language=(str(payload["language"]) if payload.get("language") else None),
-                    kind=str(payload["kind"]),
-                    start_line=int(payload["start_line"]),
-                    end_line=int(payload["end_line"]),
-                    symbol=(str(payload["symbol"]) if payload.get("symbol") else None),
-                    parent_symbol=(
-                        str(payload["parent_symbol"]) if payload.get("parent_symbol") else None
-                    ),
-                    section_path=[str(item) for item in payload.get("section_path", [])],
-                    source_url=str(payload["line_source_url"]),
+                    methods=[method],
                 )
             )
         return hits
+
+    def _hit_from_payload(
+        self,
+        payload: dict[str, object],
+        *,
+        score: float,
+        debug_score: float | None = None,
+        methods: list[str] | None = None,
+    ) -> RetrievalHit:
+        return RetrievalHit(
+            chunk_id=str(payload["chunk_id"]),
+            score=score,
+            debug_score=debug_score,
+            retrieval_methods=methods or [],
+            text=str(payload["text"]),
+            source_id=str(payload["source_id"]),
+            repository=str(payload["repository"]),
+            component=str(payload["component"]),
+            version_ref=(
+                str(payload["version_ref"]) if payload.get("version_ref") else None
+            ),
+            commit_sha=str(payload["commit_sha"]),
+            path=str(payload["path"]),
+            content_type=str(payload["content_type"]),
+            language=(str(payload["language"]) if payload.get("language") else None),
+            kind=str(payload["kind"]),
+            start_line=int(payload["start_line"]),
+            end_line=int(payload["end_line"]),
+            symbol=(str(payload["symbol"]) if payload.get("symbol") else None),
+            parent_symbol=(
+                str(payload["parent_symbol"]) if payload.get("parent_symbol") else None
+            ),
+            section_path=[str(item) for item in payload.get("section_path", [])],
+            source_url=str(payload["line_source_url"]),
+        )
 
     def _payload(
         self,
@@ -235,6 +340,7 @@ class QdrantKnowledgeStore:
             "language": chunk.language,
             "kind": chunk.kind.value,
             "text": chunk.text,
+            "debug_text": self._debug_text(chunk),
             "text_sha256": chunk.text_sha256,
             "start_line": chunk.start_line,
             "end_line": chunk.end_line,
@@ -247,3 +353,13 @@ class QdrantKnowledgeStore:
             "embedding_model": embedding_model,
             "sparse_model": sparse_model,
         }
+
+    def _debug_text(self, chunk: KnowledgeChunk) -> str:
+        values = [chunk.path]
+        if chunk.parent_symbol:
+            values.append(chunk.parent_symbol)
+        if chunk.symbol:
+            values.append(chunk.symbol)
+        values.extend(chunk.section_path)
+        values.append(chunk.text)
+        return "\n".join(values)
