@@ -1,6 +1,6 @@
 from app.chunking.models import ChunkKind, KnowledgeChunk
 from app.embeddings.text import build_embedding_text
-from app.retrieval.qdrant_store import QdrantKnowledgeStore
+from app.retrieval.qdrant_store import QdrantKnowledgeStore, model_scoped_collection_name
 
 
 def _chunk() -> KnowledgeChunk:
@@ -55,3 +55,14 @@ def test_qdrant_payload_keeps_exact_traceability() -> None:
     assert payload["parent_symbol"] == "BaseConnectorService"
     assert payload["line_source_url"].endswith("#L120-L121")
     assert payload["embedding_model"] == "BAAI/bge-small-en-v1.5"
+
+
+def test_qdrant_collection_is_isolated_by_embedding_model() -> None:
+    small = model_scoped_collection_name("tractusmind_knowledge", "BAAI/bge-small-en-v1.5")
+    large = model_scoped_collection_name("tractusmind_knowledge", "BAAI/bge-large-en-v1.5")
+
+    assert small.startswith("tractusmind_knowledge__")
+    assert small != large
+    assert small == model_scoped_collection_name(
+        "tractusmind_knowledge", "BAAI/bge-small-en-v1.5"
+    )
