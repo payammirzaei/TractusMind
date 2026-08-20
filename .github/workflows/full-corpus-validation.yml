@@ -1,0 +1,234 @@
+name: Full Corpus Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      refresh_corpus:
+        description: "Incrementally refresh all enabled sources before evaluation"
+        required: true
+        default: true
+        type: boolean
+  schedule:
+    - cron: "41 2 1 * *"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.FULL_CORPUS_VALIDATION_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: quality
+    env:
+      DATABASE_URL: ${{ secrets.QUALITY_DATABASE_URL }}
+      QDRANT_URL: ${{ secrets.QUALITY_QDRANT_URL }}
+      QDRANT_API_KEY: ${{ secrets.QUALITY_QDRANT_API_KEY }}
+      QDRANT_COLLECTION: ${{ vars.QUALITY_QDRANT_COLLECTION || 'tractusmind_knowledge' }}
+      GITHUB_TOKEN: ${{ secrets.QUALITY_GITHUB_TOKEN }}
+      LLM_BASE_URL: ${{ secrets.QUALITY_LLM_BASE_URL }}
+      LLM_API_KEY: ${{ secrets.QUALITY_LLM_API_KEY }}
+      LLM_MODEL: ${{ vars.QUALITY_LLM_MODEL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Validate quality environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$DATABASE_URL" || { echo "QUALITY_DATABASE_URL is required"; exit 2; }
+          test -n "$QDRANT_URL" || { echo "QUALITY_QDRANT_URL is required"; exit 2; }
+          test -n "$GITHUB_TOKEN" || { echo "QUALITY_GITHUB_TOKEN is required"; exit 2; }
+          test -n "$LLM_BASE_URL" || { echo "QUALITY_LLM_BASE_URL is required"; exit 2; }
+          test -n "$LLM_API_KEY" || { echo "QUALITY_LLM_API_KEY is required"; exit 2; }
+          test -n "$LLM_MODEL" || { echo "QUALITY_LLM_MODEL variable is required"; exit 2; }
+
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+
+      - name: Prepare validation artifacts
+        run: mkdir -p artifacts/full-corpus artifacts/full-corpus/sync
+
+      - name: Record enabled source set
+        shell: bash
+        run: |
+          python - <<'PY' | tee artifacts/full-corpus/enabled-sources.txt
+          from app.ingestion.registry import get_enabled_sources
+
+          for source in get_enabled_sources():
+              print(source.id)
+          PY
+
+      - name: Refresh full corpus
+        if: ${{ github.event_name == 'schedule' || inputs.refresh_corpus }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r source_id; do
+            echo "Synchronizing ${source_id}"
+            tractusmind-ingest sync "$source_id" \
+              | tee "artifacts/full-corpus/sync/${source_id}.json"
+          done < artifacts/full-corpus/enabled-sources.txt
+
+      - name: Validate full corpus snapshot
+        run: >-
+          tractusmind-corpus-validate
+          > artifacts/full-corpus/corpus.json
+
+      - name: Run six-source retrieval benchmark
+        run: |
+          tractusmind-benchmark \
+            --dataset benchmarks/full_corpus_v1.jsonl \
+            --mode all \
+            --k 5 \
+            > artifacts/full-corpus/retrieval.json
+
+      - name: Run debug retrieval benchmark
+        run: |
+          tractusmind-benchmark \
+            --dataset benchmarks/debug_v0.jsonl \
+            --mode rerank \
+            --k 5 \
+            > artifacts/full-corpus/debug.json
+
+      - name: Calibrate evidence threshold
+        run: |
+          tractusmind-answer-eval calibrate \
+            --dataset benchmarks/answer_v1.jsonl \
+            --max-unsafe-rate 0 \
+            > artifacts/full-corpus/calibration.json
+
+      - name: Use measured threshold for candidate answer evaluation
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report = json.loads(Path("artifacts/full-corpus/calibration.json").read_text())
+          threshold = float(report["recommended_threshold"])
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
+              handle.write(f"MINIMUM_RELEVANCE_SCORE={threshold:.6f}\n")
+          PY
+          tractusmind-answer-eval evaluate \
+            --dataset benchmarks/answer_v1.jsonl \
+            > artifacts/full-corpus/answer.json
+
+      - name: Run reviewed regression datasets at measured threshold
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -s benchmarks/regressions/retrieval.jsonl ]; then
+            tractusmind-benchmark \
+              --dataset benchmarks/regressions/retrieval.jsonl \
+              --mode rerank --k 5 \
+              > artifacts/full-corpus/retrieval-regression.json
+          fi
+          if [ -s benchmarks/regressions/debug.jsonl ]; then
+            tractusmind-benchmark \
+              --dataset benchmarks/regressions/debug.jsonl \
+              --mode rerank --k 5 \
+              > artifacts/full-corpus/debug-regression.json
+          fi
+          if [ -s benchmarks/regressions/answer.jsonl ]; then
+            tractusmind-answer-eval evaluate \
+              --dataset benchmarks/regressions/answer.jsonl \
+              > artifacts/full-corpus/answer-regression.json
+          fi
+
+      - name: Evaluate safety and reviewed-regression contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(
+            --config config/quality_gate.toml
+            --calibration artifacts/full-corpus/calibration.json
+            --answer artifacts/full-corpus/answer.json
+          )
+          if [ -f artifacts/full-corpus/retrieval-regression.json ]; then
+            args+=(--retrieval-regression artifacts/full-corpus/retrieval-regression.json)
+          fi
+          if [ -f artifacts/full-corpus/debug-regression.json ]; then
+            args+=(--debug-regression artifacts/full-corpus/debug-regression.json)
+          fi
+          if [ -f artifacts/full-corpus/answer-regression.json ]; then
+            args+=(--answer-regression artifacts/full-corpus/answer-regression.json)
+          fi
+          tractusmind-quality-gate "${args[@]}" \
+            | tee artifacts/full-corpus/candidate-gate.json
+
+      - name: Build reproducible validation summary and pin candidate
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          root = Path("artifacts/full-corpus")
+          corpus = json.loads((root / "corpus.json").read_text())
+          retrieval = json.loads((root / "retrieval.json").read_text())
+          answer = json.loads((root / "answer.json").read_text())
+          calibration = json.loads((root / "calibration.json").read_text())
+
+          rerank = next(item for item in retrieval["reports"] if item["mode"] == "rerank")
+          files = [
+              Path("config/sources.toml"),
+              Path("config/quality_gate.toml"),
+              Path("benchmarks/full_corpus_v1.jsonl"),
+              Path("benchmarks/debug_v0.jsonl"),
+              Path("benchmarks/answer_v1.jsonl"),
+          ]
+          input_hashes = {
+              str(path): hashlib.sha256(path.read_bytes()).hexdigest()
+              for path in files
+          }
+          summary = {
+              "git_sha": "${{ github.sha }}",
+              "corpus": {
+                  "collection_name": corpus["collection_name"],
+                  "registry_sha256": corpus["registry_sha256"],
+                  "sources": corpus["sources"],
+              },
+              "models": {
+                  "dense": retrieval["dense_model"],
+                  "sparse": retrieval["sparse_model"],
+                  "reranker": retrieval["reranker_model"],
+                  "llm": answer["model"],
+              },
+              "measured": {
+                  "minimum_relevance_score": calibration["recommended_threshold"],
+                  "retrieval_recall_at_5": rerank["recall_at_k"],
+                  "retrieval_mrr": rerank["mrr"],
+                  "retrieval_ndcg_at_5": rerank["ndcg_at_k"],
+                  **answer["metrics"],
+              },
+              "input_sha256": input_hashes,
+          }
+          (root / "validation-summary.json").write_text(
+              json.dumps(summary, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          (root / "pin-candidate.toml").write_text(
+              "# Human-review this measured value before committing it.\n"
+              "[calibration]\n"
+              f"minimum_relevance_score = {float(calibration['recommended_threshold']):.6f}\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Upload full-corpus validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tractusmind-full-corpus-${{ github.sha }}
+          path: artifacts/full-corpus
+          if-no-files-found: warn
+          retention-days: 90
