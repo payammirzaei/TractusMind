@@ -119,9 +119,9 @@ def observe_model_operation(role: str, operation: str) -> Iterator[None]:
     try:
         yield
     finally:
-        MODEL_OPERATION_DURATION.labels(role=role, operation=operation).observe(
-            perf_counter() - started
-        )
+        duration = perf_counter() - started
+        MODEL_OPERATION_DURATION.labels(role=role, operation=operation).observe(duration)
+        record_stage_duration(f"model.{role}.{operation}", duration)
 
 
 def record_model_load(role: str, duration_seconds: float) -> None:
