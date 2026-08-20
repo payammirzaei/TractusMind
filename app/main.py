@@ -33,15 +33,25 @@ logger = structlog.get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    app.state.postgres = create_postgres_engine(settings)
-    await verify_database_revision(app.state.postgres)
+    postgres = create_postgres_engine(settings)
+    try:
+        database_revision = await verify_database_revision(postgres)
+    except Exception:
+        await postgres.dispose()
+        raise
+
+    app.state.postgres = postgres
     app.state.redis = create_redis_client(settings)
     app.state.qdrant = create_qdrant_client(settings)
     app.state.auth_store = AuthStore(app.state.postgres)
     app.state.conversation_store = ConversationStore(app.state.postgres)
     app.state.quality_store = QualityStore(app.state.postgres)
     app.state.answer_service = None
-    logger.info("application_started", environment=settings.app_env)
+    logger.info(
+        "application_started",
+        environment=settings.app_env,
+        database_revision=database_revision,
+    )
 
     yield
 
