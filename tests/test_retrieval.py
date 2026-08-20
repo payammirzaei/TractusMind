@@ -63,6 +63,7 @@ def test_qdrant_payload_keeps_exact_traceability() -> None:
 
     assert payload["chunk_id"] == chunk.chunk_id
     assert payload["version_ref"] == "v0.9.0"
+    assert payload["snapshot_commit_sha"] == "a" * 40
     assert payload["commit_sha"] == "a" * 40
     assert payload["symbol"] == "create_asset"
     assert payload["parent_symbol"] == "BaseConnectorService"
