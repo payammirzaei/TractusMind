@@ -12,10 +12,13 @@ jobs:
   quality-gate:
     if: ${{ github.event_name == 'workflow_dispatch' || vars.QUALITY_GATE_ENABLED == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
+    environment: quality
     env:
+      DATABASE_URL: ${{ secrets.QUALITY_DATABASE_URL }}
       QDRANT_URL: ${{ secrets.QUALITY_QDRANT_URL }}
       QDRANT_API_KEY: ${{ secrets.QUALITY_QDRANT_API_KEY }}
+      QDRANT_COLLECTION: ${{ vars.QUALITY_QDRANT_COLLECTION || 'tractusmind_knowledge' }}
       LLM_BASE_URL: ${{ secrets.QUALITY_LLM_BASE_URL }}
       LLM_API_KEY: ${{ secrets.QUALITY_LLM_API_KEY }}
       LLM_MODEL: ${{ vars.QUALITY_LLM_MODEL }}
@@ -32,6 +35,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test -n "$DATABASE_URL" || { echo "QUALITY_DATABASE_URL is required"; exit 2; }
           test -n "$QDRANT_URL" || { echo "QUALITY_QDRANT_URL is required"; exit 2; }
           test -n "$LLM_BASE_URL" || { echo "QUALITY_LLM_BASE_URL is required"; exit 2; }
           test -n "$LLM_API_KEY" || { echo "QUALITY_LLM_API_KEY is required"; exit 2; }
@@ -43,24 +47,29 @@ jobs:
       - name: Prepare reports
         run: mkdir -p artifacts/quality
 
-      - name: Run retrieval seed report
+      - name: Validate full corpus snapshot
+        run: >-
+          tractusmind-corpus-validate
+          > artifacts/quality/corpus.json
+
+      - name: Run full corpus retrieval report
         run: |
           tractusmind-benchmark \
-            --dataset benchmarks/dense_v0.jsonl \
+            --dataset benchmarks/full_corpus_v1.jsonl \
             --mode rerank \
-            --k 5 > artifacts/quality/retrieval-seed.json
+            --k 5 > artifacts/quality/retrieval-full.json
 
-      - name: Run debug seed report
+      - name: Run debug report
         run: |
           tractusmind-benchmark \
             --dataset benchmarks/debug_v0.jsonl \
             --mode rerank \
-            --k 5 > artifacts/quality/debug-seed.json
+            --k 5 > artifacts/quality/debug.json
 
       - name: Calibrate evidence threshold
         run: |
           tractusmind-answer-eval calibrate \
-            --dataset benchmarks/answer_v0.jsonl \
+            --dataset benchmarks/answer_v1.jsonl \
             --max-unsafe-rate 0 \
             > artifacts/quality/calibration.json
 
@@ -79,11 +88,11 @@ jobs:
                   handle.write(f"MINIMUM_RELEVANCE_SCORE={float(threshold)}\n")
           PY
 
-      - name: Run grounded answer safety report
+      - name: Run grounded answer safety report at pinned threshold
         run: |
           tractusmind-answer-eval evaluate \
-            --dataset benchmarks/answer_v0.jsonl \
-            > artifacts/quality/answer-seed.json
+            --dataset benchmarks/answer_v1.jsonl \
+            > artifacts/quality/answer-full.json
 
       - name: Run reviewed regression datasets
         shell: bash
@@ -114,7 +123,7 @@ jobs:
           args=(
             --config config/quality_gate.toml
             --calibration artifacts/quality/calibration.json
-            --answer artifacts/quality/answer-seed.json
+            --answer artifacts/quality/answer-full.json
             --require-pinned-threshold
           )
           if [ -f artifacts/quality/retrieval-regression.json ]; then
@@ -135,4 +144,4 @@ jobs:
           name: tractusmind-quality-${{ github.sha }}
           path: artifacts/quality
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: 90
