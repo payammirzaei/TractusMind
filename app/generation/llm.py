@@ -71,7 +71,7 @@ class OpenAICompatibleLLM:
         self.retry_base_seconds = retry_base_seconds
         self.retry_max_seconds = retry_max_seconds
         self._sleep = sleep
-        scope_source = f"{base_url.rstrip('/')}|{model_name}".encode("utf-8")
+        scope_source = f"{base_url.rstrip('/')}|{model_name}".encode()
         self._breaker = shared_provider_circuit(
             provider="llm",
             scope=hashlib.sha256(scope_source).hexdigest()[:16],

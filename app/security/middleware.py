@@ -183,7 +183,7 @@ class RequestProtectionMiddleware:
         *,
         extra_headers: list[tuple[bytes, bytes]] | None = None,
     ) -> None:
-        body = (f'{{"detail":"{detail}"}}').encode("utf-8")
+        body = (f'{{"detail":"{detail}"}}').encode()
         headers = [
             (b"content-type", b"application/json"),
             (b"content-length", str(len(body)).encode("ascii")),

@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from app.api.ops_auth import require_ops_admin, require_ops_operator
 from app.api.routes.me import router as me_router
-from app.auth.oidc import OIDCAuthenticator, OIDCAuthenticationError
+from app.auth.oidc import OIDCAuthenticationError, OIDCAuthenticator
 from app.auth.store import UserIdentity, UserRole
 from app.core.config import Settings
 
