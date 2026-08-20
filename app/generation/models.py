@@ -37,6 +37,8 @@ class VerificationReport(BaseModel):
 
 
 class GroundedAnswer(BaseModel):
+    interaction_id: str | None = None
+    conversation_id: str | None = None
     question: str
     answer: str
     grounded: bool
