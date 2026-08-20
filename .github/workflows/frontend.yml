@@ -51,15 +51,22 @@ jobs:
           TRACTUSMIND_API_URL: http://127.0.0.1:8000
         run: npm run build
 
-      - name: Smoke production routes
+      - name: Smoke production runtime and BFF boundary
         env:
           TRACTUSMIND_API_URL: http://127.0.0.1:8000
           SMOKE_BASE_URL: http://127.0.0.1:3100
         run: |
+          npm run mock:backend > /tmp/tractusmind-mock-backend.log 2>&1 &
+          BACKEND_PID=$!
           npm run start -- --hostname 127.0.0.1 --port 3100 > /tmp/tractusmind-ui.log 2>&1 &
           UI_PID=$!
-          trap 'kill "$UI_PID" 2>/dev/null || true' EXIT
+          cleanup() {
+            kill "$UI_PID" 2>/dev/null || true
+            kill "$BACKEND_PID" 2>/dev/null || true
+          }
+          trap cleanup EXIT
           npm run smoke
+          npm run smoke:bff
 
       - name: Build runtime image
         run: docker build -t tractusmind-ui:ci .
