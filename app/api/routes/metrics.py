@@ -9,12 +9,22 @@ from app.core.config import get_settings
 router = APIRouter(tags=["observability"])
 
 
+def _bearer_token(authorization: str | None) -> str | None:
+    if authorization is None:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.casefold() != "bearer" or not token.strip():
+        return None
+    return token.strip()
+
+
 @router.get("/metrics", include_in_schema=False)
 async def metrics(
     x_tractusmind_metrics_key: Annotated[
         str | None,
         Header(alias="X-TractusMind-Metrics-Key"),
     ] = None,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> Response:
     settings = get_settings()
     if not settings.metrics_enabled:
@@ -27,10 +37,8 @@ async def metrics(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Metrics endpoint requires METRICS_ADMIN_KEY or OPS_ADMIN_KEY",
             )
-        if x_tractusmind_metrics_key is None or not secrets.compare_digest(
-            x_tractusmind_metrics_key,
-            configured,
-        ):
+        candidate = x_tractusmind_metrics_key or _bearer_token(authorization)
+        if candidate is None or not secrets.compare_digest(candidate, configured):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid metrics key",
