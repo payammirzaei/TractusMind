@@ -8,6 +8,8 @@ from app.generation.llm import LLMGenerationError, LLMProvider
 from app.generation.models import GroundedAnswer, LLMAnswerPayload, VerificationReport
 from app.generation.verification import ClaimVerifier
 from app.retrieval.reranked import RerankedRetrievalService
+from app.routing.models import QueryRoute
+from app.routing.service import QueryRouter
 
 _CITATION_RE = re.compile(r"\[(S\d+)\]")
 _ABSTAIN_MESSAGE = (
@@ -31,6 +33,7 @@ class GroundedAnswerService:
         retrieval: RerankedRetrievalService,
         llm: LLMProvider,
         verifier: ClaimVerifier,
+        router: QueryRouter | None = None,
         evidence_limit: int = 6,
         context_max_chars: int = 24_000,
         minimum_rerank_score: float | None = None,
@@ -40,6 +43,7 @@ class GroundedAnswerService:
         self.retrieval = retrieval
         self.llm = llm
         self.verifier = verifier
+        self.router = router or QueryRouter()
         self.evidence_limit = evidence_limit
         self.context_max_chars = context_max_chars
         self.minimum_rerank_score = minimum_rerank_score
@@ -52,7 +56,12 @@ class GroundedAnswerService:
         if not normalized:
             raise ValueError("Question must not be empty")
 
-        hits = await self.retrieval.search(normalized, limit=self.evidence_limit)
+        route = self.router.route(normalized)
+        hits = await self.retrieval.search(
+            normalized,
+            limit=self.evidence_limit,
+            route=route,
+        )
         if self.minimum_rerank_score is not None:
             hits = [
                 hit
@@ -63,7 +72,7 @@ class GroundedAnswerService:
 
         context = build_grounded_context(hits, max_chars=self.context_max_chars)
         if not context.blocks:
-            return self._abstain(normalized, evidence_count=0)
+            return self._abstain(normalized, evidence_count=0, route=route)
 
         raw = await self.llm.complete(
             _SYSTEM_PROMPT,
@@ -79,6 +88,7 @@ class GroundedAnswerService:
                 evidence_count=len(context.blocks),
                 citations=[],
                 verification=None,
+                route=route,
                 model=self.llm.model_name,
             )
 
@@ -94,13 +104,12 @@ class GroundedAnswerService:
             for citation_id in payload.citation_ids
             if citation_id not in citation_map
         ]
-        if (
-            invalid_ids
-            or declared_invalid
-            or not cited_ids
-            or declared_ids != inline_ids
-        ):
-            return self._abstain(normalized, evidence_count=len(context.blocks))
+        if invalid_ids or declared_invalid or not cited_ids or declared_ids != inline_ids:
+            return self._abstain(
+                normalized,
+                evidence_count=len(context.blocks),
+                route=route,
+            )
 
         verification = await self.verifier.verify(
             question=normalized,
@@ -111,6 +120,7 @@ class GroundedAnswerService:
             return self._abstain(
                 normalized,
                 evidence_count=len(context.blocks),
+                route=route,
                 verification=verification,
             )
 
@@ -123,6 +133,7 @@ class GroundedAnswerService:
             evidence_count=len(context.blocks),
             citations=[citation_map[citation_id] for citation_id in ordered_ids],
             verification=verification,
+            route=route,
             model=self.llm.model_name,
         )
 
@@ -153,6 +164,7 @@ class GroundedAnswerService:
         question: str,
         *,
         evidence_count: int,
+        route: QueryRoute,
         verification: VerificationReport | None = None,
     ) -> GroundedAnswer:
         return GroundedAnswer(
@@ -163,5 +175,6 @@ class GroundedAnswerService:
             evidence_count=evidence_count,
             citations=[],
             verification=verification,
+            route=route,
             model=self.llm.model_name,
         )
