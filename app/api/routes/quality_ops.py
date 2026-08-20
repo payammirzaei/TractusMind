@@ -7,6 +7,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from pydantic import BaseModel, Field
 
 from app.api.ops_auth import require_ops_admin
+from app.observability.metrics import (
+    QUALITY_REGRESSION_PROMOTIONS,
+    QUALITY_REVIEW_DECISIONS,
+)
 from app.quality.store import RegressionRecord, ReviewRecord, ReviewStateError
 
 router = APIRouter(
@@ -150,6 +154,10 @@ async def decide_review(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         if record is None:
             raise HTTPException(status_code=404, detail="Unknown quality review")
+        QUALITY_REVIEW_DECISIONS.labels(
+            action="dismiss",
+            root_cause=payload.root_cause,
+        ).inc()
         return _review(record)
 
     if payload.benchmark_kind is None:
@@ -184,6 +192,13 @@ async def decide_review(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if case is None:
         raise HTTPException(status_code=404, detail="Unknown quality review")
+    QUALITY_REVIEW_DECISIONS.labels(
+        action="promote",
+        root_cause=payload.root_cause,
+    ).inc()
+    QUALITY_REGRESSION_PROMOTIONS.labels(
+        benchmark_kind=payload.benchmark_kind,
+    ).inc()
     return _regression(case)
 
 
