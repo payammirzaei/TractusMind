@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     llm_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     llm_max_tokens: int = Field(default=1_500, ge=128, le=16_384)
     generation_context_max_chars: int = Field(default=24_000, ge=1_000, le=200_000)
+    verification_max_claims: int = Field(default=12, ge=1, le=50)
 
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     embedding_batch_size: int = Field(default=32, ge=1, le=256)
