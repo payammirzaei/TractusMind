@@ -58,7 +58,7 @@ export function redirectUriFor(request: Request, configured?: string) {
 
 export function safeReturnTo(value: string | null | undefined) {
   if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\")) {
-    return "/overview";
+    return "/";
   }
   return value;
 }
