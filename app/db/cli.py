@@ -48,6 +48,10 @@ def _parser() -> argparse.ArgumentParser:
     subparsers.add_parser("current", help="Show the current database revision")
     subparsers.add_parser("history", help="Show migration history")
     subparsers.add_parser("check", help="Fail unless the database is at application head")
+    subparsers.add_parser(
+        "drift",
+        help="Fail when ORM metadata differs from the migrated database schema",
+    )
     return parser
 
 
@@ -110,6 +114,8 @@ def main() -> None:
         command.current(config, verbose=True)
     elif args.command == "history":
         command.history(config, verbose=True)
+    elif args.command == "drift":
+        command.check(config)
     else:
         asyncio.run(_check())
 
