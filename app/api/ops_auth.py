@@ -1,4 +1,5 @@
 import secrets
+from typing import Annotated
 
 from fastapi import Header, HTTPException, status
 
@@ -6,7 +7,7 @@ from app.core.config import get_settings
 
 
 async def require_ops_admin(
-    x_tractusmind_admin_key: str | None = Header(default=None),
+    x_tractusmind_admin_key: Annotated[str | None, Header()] = None,
 ) -> None:
     configured = get_settings().ops_admin_key
     if not configured:
