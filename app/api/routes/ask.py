@@ -109,7 +109,7 @@ async def _finish_and_persist_failure(
     evidence_count = metadata.get("evidence_count")
 
     try:
-        await request.app.state.conversation_store.record_failure(
+        identity = await request.app.state.conversation_store.record_failure(
             question=question.strip(),
             conversation_id=conversation_id,
             request_id=request_id,
@@ -126,5 +126,18 @@ async def _finish_and_persist_failure(
     except Exception as exc:
         logger.exception(
             "answer_failure_persistence_failed",
+            error_type=type(exc).__name__,
+        )
+        return
+
+    try:
+        await request.app.state.quality_store.ensure_review(
+            interaction_id=identity.interaction_id,
+            trigger="failure",
+        )
+    except Exception as exc:
+        logger.exception(
+            "quality_review_capture_failed",
+            trigger="failure",
             error_type=type(exc).__name__,
         )
