@@ -4,6 +4,10 @@ services:
     build: ./frontend
     environment:
       TRACTUSMIND_API_URL: http://api:8000
+      TRACTUSMIND_OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}
+      TRACTUSMIND_OIDC_CLIENT_ID: ${TRACTUSMIND_OIDC_CLIENT_ID:-}
+      TRACTUSMIND_OIDC_SCOPES: ${TRACTUSMIND_OIDC_SCOPES:-openid profile email}
+      TRACTUSMIND_OIDC_REDIRECT_URI: ${TRACTUSMIND_OIDC_REDIRECT_URI:-}
     networks: [edge, backend]
     expose: ["3000"]
     read_only: true
