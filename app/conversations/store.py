@@ -30,6 +30,7 @@ class FeedbackRecord:
 class InteractionRecord:
     interaction_id: str
     conversation_id: str
+    request_id: str | None
     question: str
     answer: str | None
     status: str
@@ -76,6 +77,7 @@ class ConversationStore:
         question: str,
         answer: GroundedAnswer,
         conversation_id: str | None,
+        request_id: str | None,
         stage_durations: dict[str, float],
         total_duration_seconds: float,
         trace_id: str | None,
@@ -102,6 +104,7 @@ class ConversationStore:
                 AnswerInteraction(
                     interaction_id=interaction_id,
                     conversation_id=resolved_conversation_id,
+                    request_id=request_id,
                     question=question,
                     answer=answer.answer,
                     status="completed",
@@ -131,6 +134,7 @@ class ConversationStore:
         *,
         question: str,
         conversation_id: str | None,
+        request_id: str | None,
         error_type: str,
         stage_durations: dict[str, float],
         total_duration_seconds: float,
@@ -156,6 +160,7 @@ class ConversationStore:
                 AnswerInteraction(
                     interaction_id=interaction_id,
                     conversation_id=resolved_conversation_id,
+                    request_id=request_id,
                     question=question,
                     answer=None,
                     status="failed",
@@ -286,6 +291,7 @@ class ConversationStore:
         return InteractionRecord(
             interaction_id=interaction.interaction_id,
             conversation_id=interaction.conversation_id,
+            request_id=interaction.request_id,
             question=interaction.question,
             answer=interaction.answer,
             status=interaction.status,
