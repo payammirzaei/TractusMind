@@ -86,9 +86,9 @@ jobs:
           MOCK_BACKEND_HOST=0.0.0.0 npm run mock:backend > /tmp/tractusmind-image-mock-backend.log 2>&1 &
           BACKEND_PID=$!
           UI_CID=$(docker run -d \
-            --add-host=host.docker.internal:host-gateway \
-            -p 127.0.0.1:3101:3000 \
-            -e TRACTUSMIND_API_URL=http://host.docker.internal:8000 \
+            --network host \
+            -e PORT=3101 \
+            -e TRACTUSMIND_API_URL=http://127.0.0.1:8000 \
             tractusmind-ui:ci)
           cleanup() {
             docker rm -f "$UI_CID" >/dev/null 2>&1 || true
