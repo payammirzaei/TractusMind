@@ -6,6 +6,7 @@ from fastapi import FastAPI
 
 from app.api.routes.ask import router as ask_router
 from app.api.routes.health import router as health_router
+from app.api.routes.ops import router as ops_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.infra.postgres import create_postgres_engine
@@ -43,6 +44,7 @@ app = FastAPI(
 )
 app.include_router(health_router)
 app.include_router(ask_router)
+app.include_router(ops_router)
 
 
 @app.get("/", tags=["system"])
