@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     source_sync_lock_seconds: int = Field(default=43_200, ge=300, le=604_800)
     ops_admin_key: str | None = None
 
+    metrics_enabled: bool = True
+    metrics_admin_key: str | None = None
+    otel_traces_endpoint: str | None = None
+    otel_service_name: str = "tractusmind-api"
+    otel_sample_ratio: float = Field(default=1.0, ge=0.0, le=1.0)
+
     s3_endpoint_url: str | None = None
     s3_access_key_id: str | None = None
     s3_secret_access_key: str | None = None
