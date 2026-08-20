@@ -13,6 +13,7 @@ provenance, and evaluation come before UI work.
 - FastEmbed `BAAI/bge-small-en-v1.5` dense embeddings
 - FastEmbed `Qdrant/bm25` sparse lexical retrieval
 - Qdrant RRF hybrid fusion
+- Debug exact phrase/symbol/path retrieval with full-text payload indexing
 - FastEmbed cross-encoder reranking with `Xenova/ms-marco-MiniLM-L-6-v2`
 - Deterministic version-aware query routing
 - OpenAI-compatible LLM provider interface
@@ -65,8 +66,9 @@ commit SHA, blob SHA, language/content type, SHA-256 content hash, normalized UT
 commit-pinned URLs. `version_ref` is propagated into every `KnowledgeChunk`, Qdrant payload,
 retrieval hit, evidence block, and answer citation.
 
-After upgrading an older index to this milestone, run a full source re-index to backfill
-`version_ref` on existing Qdrant payloads before using explicit `ref:` filters.
+After upgrading an older index to this milestone, run a full source re-index. This backfills both
+`version_ref` and the new `debug_text` payload used by exact debug lookup. Index creation also adds
+a Qdrant full-text index with whitespace tokenization and phrase matching.
 
 Smart chunking keeps retrieval units source-traceable:
 
@@ -96,13 +98,13 @@ cost. It currently recognizes:
 
 The route records `intent`, selected `source_ids`, detected semantic `version`, explicit `ref`,
 explicit `commit_sha`, and human-readable routing reasons. Source/ref/commit constraints become
-Qdrant payload filters before dense/BM25 retrieval.
+Qdrant payload filters before retrieval.
 
 ```bash
 # SDK route -> tractusx-sdk + docs
 tractusmind-ingest search "How do I create an asset with the Tractus-X SDK?"
 
-# Debug route -> EDC-focused source filter
+# Debug route -> EDC-focused source filter + exact debug lane
 tractusmind-ingest search "EDC connector returns 500 error during transfer"
 
 # Release version is detected and routed to release evidence
@@ -116,8 +118,44 @@ Semantic versions such as `24.05` are not blindly converted into a hard `version
 because one release repository/ref may document several releases. Explicit `ref:` and `commit:`
 constraints are exact and fail closed when matching indexed provenance is unavailable.
 
-Search output includes the complete route trace plus `version_ref`, commit SHA, source ID, path,
-line range, retrieval score, and rerank score for every hit.
+## Debug retrieval lane
+
+Queries routed as `debug` use an additional exact-search lane before cross-encoder reranking.
+The query parser extracts engineering signals such as quoted error text, exception classes,
+CamelCase/snake_case identifiers, dotted config keys, file paths, environment-style identifiers,
+and HTTP 4xx/5xx codes.
+
+The debug path is:
+
+```text
+debug query
+  -> route/source/ref/commit filter
+  -> exact phrase + symbol + parent-symbol + path lookup
+  -> normal dense + BM25 hybrid retrieval
+  -> weighted RRF across exact + hybrid candidates
+  -> cross-encoder reranker
+  -> final evidence
+```
+
+Exact lookup uses the `debug_text` Qdrant payload field, which combines path, symbols, section
+metadata, and original chunk text. Exact symbol/path hits receive stronger first-stage weights,
+but the cross-encoder still makes the final evidence ordering decision.
+
+Every retrieval hit preserves `debug_score` and `retrieval_methods`, for example
+`exact_symbol`, `exact_phrase`, `identifier_text`, and `hybrid`. The same provenance is exposed
+through answer citations and the search CLI.
+
+Debug fusion settings are configurable:
+
+```bash
+DEBUG_EXACT_K=30
+DEBUG_RRF_K=60
+DEBUG_EXACT_WEIGHT=1.5
+DEBUG_HYBRID_WEIGHT=1.0
+```
+
+If an older index has not yet been re-indexed with `debug_text`, the exact lane can return no
+candidates while the normal hybrid lane continues to function.
 
 ## Grounded answer generation
 
@@ -146,8 +184,7 @@ Production answer path:
 question
   -> deterministic query routing
   -> source/ref/commit payload filtering
-  -> dense + BM25 retrieval
-  -> RRF fusion
+  -> normal hybrid OR debug exact+hybrid candidate generation
   -> cross-encoder reranking
   -> bounded evidence context
   -> grounded LLM generation
@@ -160,16 +197,17 @@ Evidence IDs such as `[S1]` are assigned by the backend. The model is not truste
 repository URLs, source IDs, refs, commit SHAs, paths, or line numbers. Structured `citation_ids`
 must exactly match inline citations in the generated answer.
 
-The API response preserves the route decision and the exact `version_ref` + commit provenance for
-each citation. The claim verifier performs a second pass over the answer and evidence, breaks the
-answer into atomic factual claims, and checks whether each cited source directly supports it.
+The API response preserves the route decision, retrieval-method trace, and exact
+`version_ref` + commit provenance for each citation. The claim verifier performs a second pass
+over the answer and evidence, breaks the answer into atomic factual claims, and checks whether
+each cited source directly supports it.
 
 If verification fails, TractusMind returns an abstention rather than a supposedly grounded
 answer. The verification report is preserved in the API response for inspection.
 
 ## Retrieval benchmark
 
-The fixed retrieval seed is stored in `benchmarks/dense_v0.jsonl`.
+The general retrieval seed is stored in `benchmarks/dense_v0.jsonl`.
 
 ```bash
 tractusmind-benchmark --mode all --k 5
@@ -178,7 +216,17 @@ tractusmind-benchmark --mode hybrid --k 5
 tractusmind-benchmark --mode rerank --k 5
 ```
 
-All benchmark modes now use the same deterministic router as production. Per-case reports include
+Debug-specific retrieval uses a separate seed built from identifiers verified in current
+Tractus-X sources:
+
+```bash
+tractusmind-benchmark \
+  --dataset benchmarks/debug_v0.jsonl \
+  --mode rerank \
+  --k 5
+```
+
+All benchmark modes use the same deterministic router as production. Per-case reports include
 the route trace as well as retrieval metrics.
 
 Current retrieval metrics:
@@ -200,7 +248,7 @@ Calibrate the reranker evidence threshold without calling the LLM:
 tractusmind-answer-eval calibrate --max-unsafe-rate 0
 ```
 
-Calibration now uses the same query router and source filters as production. The sweep reports:
+Calibration uses the same router and retrieval services as production. The sweep reports:
 
 - recommended `MINIMUM_RELEVANCE_SCORE`
 - true accept rate on answerable questions
@@ -239,9 +287,9 @@ question
   -> payload filter
   -> dense candidates
   -> sparse candidates
-  -> RRF fusion
-  -> hybrid score
-  -> rerank score
+  -> exact debug candidates when applicable
+  -> fusion score + retrieval methods
+  -> cross-encoder rerank score
   -> evidence threshold
   -> final evidence
   -> generated answer
@@ -256,7 +304,7 @@ See [`docs/architecture.md`](docs/architecture.md) for the architecture contract
 
 ## Current milestone
 
-**V6 — Version-Aware Query Routing**
+**V7 — Debug Retrieval Lane**
 
 - [x] FastAPI service shell
 - [x] Qdrant/PostgreSQL/Redis connectivity contract
@@ -273,7 +321,6 @@ See [`docs/architecture.md`](docs/architecture.md) for the architecture contract
 - [x] Model-scoped hybrid Qdrant collection
 - [x] Dense + sparse RRF fusion
 - [x] Cross-encoder reranking with preserved first-stage scores
-- [x] Dense vs Hybrid vs Reranked benchmark runner
 - [x] OpenAI-compatible grounded generation provider
 - [x] Backend-owned citation IDs and exact source mapping
 - [x] `/v1/ask` API endpoint
@@ -287,9 +334,12 @@ See [`docs/architecture.md`](docs/architecture.md) for the architecture contract
 - [x] Semantic version extraction + explicit ref/commit constraints
 - [x] Qdrant source/ref/commit payload filters
 - [x] `version_ref` provenance from ingestion through citations
-- [x] Route traces in CLI, API responses, benchmark, and calibration
+- [x] Exact debug phrase/symbol/path/config lookup
+- [x] Debug + hybrid weighted RRF fusion
+- [x] Retrieval-method/debug-score provenance
+- [x] Real-source debug retrieval benchmark seed
+- [ ] run full-corpus debug benchmark and tune fusion weights
 - [ ] run calibration against a fully indexed corpus and persist the measured threshold
-- [ ] debugging-specific exact-search retrieval lane
 - [ ] incremental re-indexing and source-state persistence
 
 ## License
