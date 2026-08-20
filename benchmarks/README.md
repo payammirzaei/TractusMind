@@ -1,22 +1,39 @@
 # TractusMind Benchmarks
 
-This directory contains fixed evaluation sets used to prevent retrieval regressions.
+This directory contains fixed evaluation sets used to prevent retrieval and answer-quality regressions.
 
-Current categories include:
+## Retrieval benchmark
 
-- Tractus-X concepts
-- EDC coding and configuration
-- Debugging and exact identifier lookup
-- Architecture and dataspace flows
-- Semantic Models / SAMM
-- Version-specific questions
-
-`dense_v0.jsonl` is the first retrieval seed. Each case declares the expected source IDs and optional terms that must appear in the same returned chunk.
-
-Run the same indexed hybrid collection through both retrieval modes:
+`dense_v0.jsonl` contains source-grounded retrieval questions. Each case declares expected source IDs and optional terms that must appear in a returned chunk.
 
 ```bash
-tractusmind-benchmark --mode both --k 5
+tractusmind-benchmark --mode all --k 5
 ```
 
-The current runner reports Recall@K/evidence hit rate, MRR, NDCG@K, first relevant rank, and the top source IDs for every question. Future evaluation layers will add reranker comparisons, citation correctness, answer groundedness, and version correctness.
+The retrieval runner compares Dense, Hybrid, and Hybrid + Reranker with Recall@K, MRR, NDCG@K, first relevant rank, and top source IDs.
+
+## Answer benchmark
+
+`answer_v0.jsonl` contains both answerable and deliberately unanswerable questions. The negative cases are required for meaningful abstention calibration.
+
+Calibrate the reranker evidence cutoff without calling the LLM:
+
+```bash
+tractusmind-answer-eval calibrate --max-unsafe-rate 0
+```
+
+Then, with an LLM provider configured, run the end-to-end answer gate:
+
+```bash
+tractusmind-answer-eval evaluate
+```
+
+The answer runner reports:
+
+- grounded answer accuracy
+- citation correctness
+- claim support rate
+- false abstention rate
+- unsafe answer rate
+
+Calibration reports a recommended `MINIMUM_RELEVANCE_SCORE` plus true accept, false abstention, unsafe evidence accept, and balanced accuracy metrics.
