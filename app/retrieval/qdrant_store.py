@@ -59,6 +59,7 @@ class QdrantKnowledgeStore:
             "repository",
             "component",
             "version_ref",
+            "snapshot_commit_sha",
             "commit_sha",
             "content_type",
             "language",
@@ -137,6 +138,74 @@ class QdrantKnowledgeStore:
 
         return indexed
 
+    async def update_source_snapshot(
+        self,
+        *,
+        source_id: str,
+        paths: Sequence[str],
+        version_ref: str,
+        snapshot_commit_sha: str,
+    ) -> None:
+        if not paths:
+            return
+        await self.client.set_payload(
+            collection_name=self.collection_name,
+            payload={
+                "version_ref": version_ref,
+                "snapshot_commit_sha": snapshot_commit_sha,
+            },
+            points=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="source_id",
+                        match=models.MatchValue(value=source_id),
+                    ),
+                    models.FieldCondition(
+                        key="path",
+                        match=models.MatchAny(any=list(paths)),
+                    ),
+                ]
+            ),
+            wait=True,
+        )
+
+    async def delete_source_paths(
+        self,
+        *,
+        source_id: str,
+        paths: Sequence[str],
+        keep_snapshot_commit_sha: str | None = None,
+    ) -> None:
+        if not paths:
+            return
+
+        must = [
+            models.FieldCondition(
+                key="source_id",
+                match=models.MatchValue(value=source_id),
+            ),
+            models.FieldCondition(
+                key="path",
+                match=models.MatchAny(any=list(paths)),
+            ),
+        ]
+        must_not = []
+        if keep_snapshot_commit_sha is not None:
+            must_not.append(
+                models.FieldCondition(
+                    key="snapshot_commit_sha",
+                    match=models.MatchValue(value=keep_snapshot_commit_sha),
+                )
+            )
+
+        await self.client.delete(
+            collection_name=self.collection_name,
+            points_selector=models.FilterSelector(
+                filter=models.Filter(must=must, must_not=must_not)
+            ),
+            wait=True,
+        )
+
     async def remove_stale_source_versions(
         self,
         source_id: str,
@@ -154,7 +223,7 @@ class QdrantKnowledgeStore:
                     ],
                     must_not=[
                         models.FieldCondition(
-                            key="commit_sha",
+                            key="snapshot_commit_sha",
                             match=models.MatchValue(value=current_commit_sha),
                         )
                     ],
@@ -313,6 +382,11 @@ class QdrantKnowledgeStore:
             version_ref=(
                 str(payload["version_ref"]) if payload.get("version_ref") else None
             ),
+            snapshot_commit_sha=(
+                str(payload["snapshot_commit_sha"])
+                if payload.get("snapshot_commit_sha")
+                else None
+            ),
             commit_sha=str(payload["commit_sha"]),
             path=str(payload["path"]),
             content_type=str(payload["content_type"]),
@@ -341,6 +415,7 @@ class QdrantKnowledgeStore:
             "repository": chunk.repository,
             "component": chunk.component,
             "version_ref": chunk.version_ref,
+            "snapshot_commit_sha": chunk.commit_sha,
             "commit_sha": chunk.commit_sha,
             "path": chunk.path,
             "blob_sha": chunk.blob_sha,
