@@ -74,11 +74,21 @@ class FakeConversationStore:
         )
 
 
+class FakeQualityStore:
+    def __init__(self) -> None:
+        self.reviews: list[tuple[str, str]] = []
+
+    async def ensure_review(self, *, interaction_id: str, trigger: str) -> str:
+        self.reviews.append((interaction_id, trigger))
+        return "44444444-4444-4444-8444-444444444444"
+
+
 def _app(service) -> tuple[FastAPI, FakeConversationStore]:
     app = FastAPI()
     store = FakeConversationStore()
     app.state.answer_service = service
     app.state.conversation_store = store
+    app.state.quality_store = FakeQualityStore()
     app.include_router(ask_router)
     app.include_router(feedback_router)
     app.middleware("http")(observe_http_request)
@@ -124,6 +134,7 @@ def test_generation_failure_is_persisted_before_http_error() -> None:
     assert store.failure_kwargs["model"] == "test-model"
     assert store.failure_kwargs["evidence_count"] == 2
     assert store.failure_kwargs["route_json"] == {"intent": "sdk"}
+    assert app.state.quality_store.reviews == [(_INTERACTION_ID, "failure")]
     durations = store.failure_kwargs["stage_durations"]
     assert isinstance(durations, dict)
     assert "generation" in durations
@@ -145,6 +156,7 @@ def test_feedback_endpoint_upserts_completed_interaction_feedback() -> None:
     assert response.status_code == 200
     assert response.json()["feedback_id"] == _FEEDBACK_ID
     assert response.json()["rating"] == "down"
+    assert app.state.quality_store.reviews == [(_INTERACTION_ID, "feedback_down")]
 
 
 def test_feedback_rejects_unknown_interaction() -> None:
