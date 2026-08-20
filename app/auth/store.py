@@ -28,6 +28,10 @@ class UserRole(StrEnum):
         return self.rank >= required.rank
 
 
+class ExternalRoleManagedError(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class UserIdentity:
     user_id: str
@@ -172,6 +176,10 @@ class AuthStore:
             user = await session.get(UserAccount, user_id)
             if user is None:
                 return None
+            if role is not None and user.auth_type == "oidc":
+                raise ExternalRoleManagedError(
+                    "OIDC user roles are managed by identity-provider claims"
+                )
             if enabled is not None:
                 user.enabled = enabled
             if role is not None:
