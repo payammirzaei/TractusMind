@@ -12,8 +12,8 @@ from app.observability.metrics import (
 )
 from app.resilience import (
     CircuitOpenError,
-    ProviderCircuitBreaker,
     parse_retry_after,
+    shared_provider_circuit,
     sleep_before_retry,
 )
 
@@ -39,6 +39,8 @@ class GitHubApiClient:
         transport: httpx.AsyncBaseTransport | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
+        if max_attempts < 1:
+            raise ValueError("GitHub max_attempts must be positive")
         headers = {
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
@@ -50,7 +52,7 @@ class GitHubApiClient:
         self.retry_base_seconds = retry_base_seconds
         self.retry_max_seconds = retry_max_seconds
         self._sleep = sleep
-        self._breaker = ProviderCircuitBreaker(
+        self._breaker = shared_provider_circuit(
             provider="github",
             failure_threshold=circuit_failure_threshold,
             cooldown_seconds=circuit_cooldown_seconds,
