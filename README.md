@@ -1,80 +1,55 @@
 # TractusMind
 
-**A source-grounded AI engineering copilot for the Tractus-X ecosystem.**
+**A source-grounded AI engineering copilot for the Tractus-X ecosystem — with an inspectable Mission Control UI.**
 
-TractusMind answers architecture, documentation, coding, debugging, semantic-model, and
-version-specific questions using traceable Tractus-X sources. Retrieval quality, provenance,
-inspectability, production safety, and measurable evaluation come before UI work.
+TractusMind answers architecture, documentation, coding, debugging, semantic-model, and version-specific questions from traceable Tractus-X sources. It is designed around provenance, retrieval quality, measurable evaluation, operational safety, and inspectability rather than opaque AI behavior.
 
-## What is implemented
+## Mission Control
 
-- FastAPI source-grounded query API
+The V22 control surface lives in `frontend/` and uses **Next.js 16.3 + React 19.2 + Tailwind CSS 4.3 + shadcn-compatible components + Motion**.
+
+Its visual language is modern industrial skeuomorphism: graphite chassis, recessed evidence wells, tactile controls, status LEDs, and restrained cyan/amber instrumentation. Chat content stays comparatively flat for readability.
+
+Functional consoles:
+
+- **Copilot** — grounded chat, citation markers, feedback, route/verification metadata
+- **Evidence Inspector** — repo, ref, snapshot commit, content commit, file/lines, retrieval/rerank/debug scores
+- **Sources** — source registry, snapshot state, file counts, admin sync controls
+- **Operations** — ingestion summary and run channel
+- **Quality** — human review queue and regression status
+- **Access** — API-key identity provisioning and enable/disable controls
+
+Navigation is RBAC-aware: `user < operator < admin`.
+
+## Core backend
+
+- FastAPI grounded answer API
 - allowlisted, commit-pinned Tractus-X GitHub ingestion
 - structure-aware Markdown/code/YAML/Turtle chunking
-- Qdrant dense + BM25 hybrid retrieval + exact debug lane
-- RRF fusion + cross-encoder reranking
+- Qdrant dense + BM25 hybrid retrieval
+- exact debug retrieval lane + RRF fusion
+- cross-encoder reranking
 - deterministic source/version/ref/commit routing
 - OpenAI-compatible grounded generation
 - backend-owned citations + atomic claim verification
 - bounded provider retries, idempotency, and circuit breakers
-- incremental PostgreSQL/Qdrant source synchronization
+- incremental PostgreSQL/Qdrant synchronization
 - Redis + Dramatiq background ingestion
 - persisted conversations, traces, feedback, and human quality review
-- API-key identities + enterprise OIDC/JWKS bearer authentication
-- user/operator/admin RBAC + stable user-owned conversation history
+- API-key identities + enterprise OIDC/JWKS
+- user/operator/admin RBAC
 - Alembic migrations + ORM drift checks
 - six-source full-corpus validation + calibration workflow
 - production quality gate + reviewed regressions
 - Prometheus/OpenTelemetry/Grafana/Alertmanager observability
 - hardened production Compose + Caddy TLS + Docker secrets
-- Trivy security CI + GHCR release images with SBOM/provenance
+- Trivy security CI + GHCR images with SBOM/provenance
 
-## Local development
-
-```bash
-cp .env.example .env
-docker compose up --build
-```
-
-```text
-API          http://localhost:8000
-OpenAPI      http://localhost:8000/docs
-Grafana      http://localhost:3000
-Prometheus   http://localhost:9090
-Alertmanager http://localhost:9093
-Qdrant       http://localhost:6333/dashboard
-```
-
-Without Docker:
-
-```bash
-python -m pip install -e ".[dev]"
-tractusmind-db bootstrap
-ruff check .
-pytest -q
-```
-
-## Production deployment
-
-Production uses `docker-compose.prod.yml` with Caddy as the public TLS edge. PostgreSQL, Redis, and
-Qdrant are private; Grafana/Prometheus/Alertmanager bind only to loopback for operator access.
-
-```bash
-cp .env.production.example .env.production
-mkdir -p secrets
-# populate secrets/* as documented
-
-docker compose --env-file .env.production -f docker-compose.prod.yml build
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d
-```
-
-See [`docs/production-deployment.md`](docs/production-deployment.md).
-
-## Retrieval and grounded answers
+## Grounded answer pipeline
 
 ```text
 question
-  -> owned bounded history when eligible
+  -> bounded owned history when eligible
   -> deterministic route
   -> source/ref/snapshot filter
   -> dense + BM25 retrieval
@@ -88,12 +63,54 @@ question
   -> answer or abstention
 ```
 
-History is context, not evidence. Previous assistant answers cannot become source citations.
-Explicit `ref:` and `commit:` constraints fail closed when indexed provenance is unavailable.
+History is context, not evidence. Previous assistant answers cannot become source citations. Explicit `ref:` and `commit:` constraints fail closed when indexed provenance is unavailable.
+
+## Local development
+
+Backend only:
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+Backend + Mission Control:
+
+```bash
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.ui.yml \
+  up --build
+```
+
+```text
+Mission Control http://localhost:3100
+API             http://localhost:8000
+OpenAPI         http://localhost:8000/docs
+Grafana         http://localhost:3000
+Prometheus      http://localhost:9090
+Alertmanager    http://localhost:9093
+Qdrant          http://localhost:6333/dashboard
+```
+
+Frontend only:
+
+```bash
+cd frontend
+cp .env.example .env.local
+npm install
+npm run dev
+```
+
+## Mission Control security boundary
+
+The browser does **not** keep the bearer credential in localStorage. `/api/session` validates it against backend `/v1/me` and stores it in an HttpOnly, SameSite cookie. Browser requests then use the Next.js BFF endpoint `/api/backend/*`, which proxies only allowlisted `v1` and `health` backend paths.
+
+This keeps the FastAPI service private in the production UI topology while preserving the existing API-key and OIDC/JWKS authentication model.
+
+See [`docs/mission-control.md`](docs/mission-control.md).
 
 ## Authentication and RBAC
-
-TractusMind accepts either self-contained opaque API keys or verified OIDC access tokens:
 
 ```text
 Authorization: Bearer tm_...
@@ -101,56 +118,33 @@ Authorization: Bearer tm_...
 Authorization: Bearer <OIDC JWT>
 ```
 
-OIDC uses standard discovery + JWKS and verifies issuer, expiry, configured audience, allowed
-algorithm, and signing key. Unknown `kid` values trigger one JWKS refresh for normal key rotation.
+OIDC uses discovery + JWKS and validates issuer, expiry, configured audience, asymmetric signing algorithm, and signing key. Unknown `kid` values trigger one JWKS refresh for normal key rotation.
 
-```bash
-OIDC_ENABLED=true
-OIDC_ISSUER_URL=https://id.example.com/realms/tractusmind
-OIDC_AUDIENCE=tractusmind-api
-OIDC_ALLOWED_ALGORITHMS=RS256
-OIDC_ROLE_CLAIMS=roles,realm_access.roles,groups
-OIDC_ADMIN_ROLES=tractusmind-admin
-OIDC_OPERATOR_ROLES=tractusmind-operator
-```
-
-Roles are hierarchical:
+Roles:
 
 ```text
 user < operator < admin
 ```
 
-- **user**: ask, owned conversations, feedback
-- **operator**: user capabilities + read-only operations/quality inspection
-- **admin**: operator capabilities + sync triggers, quality decisions, API-key user management
+- **user** — ask, owned conversations, feedback
+- **operator** — user capabilities + read-only operations/quality inspection
+- **admin** — operator capabilities + sync, quality decisions, identity lifecycle
 
-OIDC identities are persisted by `(issuer, subject)` so ownership remains stable across token
-refreshes. OIDC roles remain IdP-managed; TractusMind can locally disable an external identity but
-cannot override its role. `OPS_ADMIN_KEY` remains only as a break-glass admin path.
+OIDC identities are persisted by `(issuer, subject)`. OIDC roles stay IdP-managed; TractusMind can locally disable an external identity but does not override its role. `OPS_ADMIN_KEY` remains only as break-glass admin access.
 
-See [`docs/authenticated-conversations.md`](docs/authenticated-conversations.md).
+## Full-corpus validation
 
-## Full-corpus validation and quality gate
-
-A benchmark run is valid only after the indexed corpus itself passes consistency and optional
-upstream-freshness checks:
+A benchmark run is valid only after the indexed corpus passes consistency and optional upstream-freshness checks:
 
 ```bash
 tractusmind-corpus-validate --verify-upstream
 ```
 
-V1 retrieval/answer datasets cover all six enabled sources: SDK, EDC, Digital Twin Registry,
-semantic models, Tractus-X docs, and release metadata.
+V1 retrieval/answer datasets cover all six enabled sources: SDK, EDC, Digital Twin Registry, semantic models, Tractus-X docs, and release metadata.
 
-The full-corpus workflow can refresh every source, validate PostgreSQL/Qdrant/upstream snapshot
-identity, run dense/hybrid/rerank/debug evaluation, calibrate the evidence threshold, run answer
-safety evaluation and reviewed regressions, then emit a reproducible validation artifact.
+The measured evidence threshold is never auto-committed. Human review is required before pinning it in `config/quality_gate.toml`.
 
-The measured threshold is never auto-committed. Human review is required before pinning it in
-`config/quality_gate.toml`.
-
-See [`docs/full-corpus-validation.md`](docs/full-corpus-validation.md) and
-[`docs/quality-gate.md`](docs/quality-gate.md).
+See [`docs/full-corpus-validation.md`](docs/full-corpus-validation.md) and [`docs/quality-gate.md`](docs/quality-gate.md).
 
 ## Human-reviewed quality loop
 
@@ -172,68 +166,61 @@ failed answer / down-vote
 
 Raw feedback never becomes gold data automatically.
 
-See [`docs/quality-loop.md`](docs/quality-loop.md).
+## Production deployment
 
-## Observability
-
-Prometheus captures API/RAG/model/provider/ingestion/worker/quality signals. Grafana ships with
-provisioned API/RAG, provider/ingestion, and quality-loop dashboards. Alertmanager evaluates
-repository-owned alert rules.
-
-See [`docs/observability.md`](docs/observability.md) and
-[`docs/grafana-alerting.md`](docs/grafana-alerting.md).
-
-## Database migrations
-
-Runtime code never creates or alters tables. Current Alembic chain:
-
-```text
-0001_core_schema
-  -> 0002_user_auth
-  -> 0003_oidc_rbac   (head)
-```
+Backend production topology remains in `docker-compose.prod.yml`. Mission Control is added through `docker-compose.ui.prod.yml`; Caddy becomes the sole public edge and proxies to the frontend, while the frontend reaches FastAPI only over the private backend network.
 
 ```bash
-tractusmind-db bootstrap
-tractusmind-db upgrade
-tractusmind-db check
-tractusmind-db drift
+docker compose \
+  --env-file .env.production \
+  -f docker-compose.prod.yml \
+  -f docker-compose.ui.prod.yml \
+  up -d --build
 ```
 
-See [`docs/database-migrations.md`](docs/database-migrations.md).
+PostgreSQL, Redis, and Qdrant remain private. Grafana/Prometheus/Alertmanager remain operator-only loopback services.
+
+See [`docs/production-deployment.md`](docs/production-deployment.md) and [`docs/mission-control.md`](docs/mission-control.md).
+
+## Validation gates
+
+Backend CI validates Ruff, migrations/drift, PostgreSQL-backed tests, Compose/Prometheus/Grafana configuration and security checks.
+
+Frontend CI validates:
+
+1. production dependency audit at HIGH severity,
+2. TypeScript typecheck,
+3. Next.js production build,
+4. runtime Docker image build.
 
 ## Current milestone
 
-**V21 — Enterprise OIDC/JWKS + RBAC**
+**V22 — Mission Control UI**
 
-Completed:
+Implemented in the current cut:
 
-- [x] API-key authentication remains backward-compatible
-- [x] standard OIDC discovery + JWKS verification
-- [x] issuer/expiry/audience/algorithm/signing-key validation
-- [x] JWKS caching + forced refresh on unknown signing `kid`
-- [x] OIDC provider outage distinguished from invalid bearer token
-- [x] stable external identity persistence by `(issuer, subject)`
-- [x] `user`, `operator`, and `admin` role hierarchy
-- [x] configurable role claim paths for common Keycloak/Entra-style tokens
-- [x] read-only operator access to source/run/interaction/quality ops
-- [x] admin-only sync, quality decisions, and user lifecycle mutations
-- [x] OIDC roles remain identity-provider managed
-- [x] local disable state remains authoritative for OIDC users
-- [x] `OPS_ADMIN_KEY` retained as break-glass admin access
-- [x] request-local auth caching avoids duplicate JWT verification
-- [x] `0003_oidc_rbac` migration + schema-head enforcement
-- [x] deterministic JWT/RBAC tests with local RSA keys and mocked discovery/JWKS
+- [x] Next.js/Tailwind/shadcn/Motion foundation
+- [x] industrial skeuomorphic design system
+- [x] HttpOnly BFF authentication boundary
+- [x] role-aware navigation
+- [x] grounded chat workbench
+- [x] source/provenance inspector
+- [x] route + claim-verification visibility
+- [x] feedback wired to backend quality loop
+- [x] source registry + admin sync
+- [x] ingestion operations console
+- [x] quality review console
+- [x] user/API-key administration
+- [x] dedicated frontend CI/build/security gate
+- [x] dev and production Compose overlays
+- [x] Caddy-to-Mission-Control production edge
 
-Still environment/measurement dependent:
+Still environment-dependent rather than missing backend/UI code:
 
-- [ ] configure a real enterprise IdP and validate its production token shape
-- [ ] execute the first complete V20 full-corpus measurement run
-- [ ] review and pin the measured evidence threshold
+- [ ] run the first complete V20 full-corpus measurement and pin the reviewed threshold
+- [ ] validate a production Keycloak/Entra token shape
 - [ ] connect the real Alertmanager receiver
-- [ ] promote reviewed production cases into committed regressions
-
-Next major milestone: **V22 — Mission Control UI**.
+- [ ] run the V22 frontend Actions build on the deployment environment and fix any platform-specific issue it exposes
 
 ## License
 
