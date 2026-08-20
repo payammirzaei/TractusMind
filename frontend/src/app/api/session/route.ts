@@ -5,6 +5,7 @@ import {
   SESSION_COOKIE_NAME,
   SESSION_COOKIE_OPTIONS,
   SESSION_MAX_AGE_SECONDS,
+  trustedBrowserMutation,
 } from "@/lib/server-session";
 
 const API_URL = (process.env.TRACTUSMIND_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
@@ -21,14 +22,6 @@ function expireSession(response: NextResponse) {
     maxAge: 0,
   });
   return response;
-}
-
-function trustedBrowserMutation(request: Request) {
-  const requestUrl = new URL(request.url);
-  const origin = request.headers.get("origin");
-  const fetchSite = request.headers.get("sec-fetch-site");
-  if (fetchSite === "cross-site") return false;
-  return !origin || origin === requestUrl.origin;
 }
 
 async function identityFor(token: string) {
