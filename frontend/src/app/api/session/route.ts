@@ -15,6 +15,14 @@ function noStore(response: NextResponse) {
   return response;
 }
 
+function expireSession(response: NextResponse) {
+  response.cookies.set(SESSION_COOKIE_NAME, "", {
+    ...SESSION_COOKIE_OPTIONS,
+    maxAge: 0,
+  });
+  return response;
+}
+
 function trustedBrowserMutation(request: Request) {
   const requestUrl = new URL(request.url);
   const origin = request.headers.get("origin");
@@ -41,12 +49,14 @@ export async function GET() {
   try {
     const response = await identityFor(token);
     const body = await response.text();
-    return noStore(
+    const nextResponse = noStore(
       new NextResponse(body, {
         status: response.status,
         headers: { "content-type": response.headers.get("content-type") ?? "application/json" },
       }),
     );
+    if (response.status === 401 || response.status === 403) expireSession(nextResponse);
+    return nextResponse;
   } catch {
     return noStore(NextResponse.json({ detail: "TractusMind API unavailable" }, { status: 503 }));
   }
@@ -114,10 +124,5 @@ export async function DELETE(request: Request) {
     );
   }
 
-  const response = noStore(NextResponse.json({ ok: true }));
-  response.cookies.set(SESSION_COOKIE_NAME, "", {
-    ...SESSION_COOKIE_OPTIONS,
-    maxAge: 0,
-  });
-  return response;
+  return noStore(expireSession(NextResponse.json({ ok: true })));
 }
