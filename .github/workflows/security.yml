@@ -19,6 +19,7 @@ jobs:
       - name: Scan repository filesystem
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.73.0
           scan-type: fs
           scan-ref: .
           scanners: vuln,secret,misconfig
@@ -32,10 +33,14 @@ jobs:
       - name: Scan backend image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.73.0
           image-ref: tractusmind:security
           scanners: vuln,secret
           severity: HIGH,CRITICAL
           ignore-unfixed: true
+          # pip 26.2+ ships a CycloneDX inventory for its isolated vendored code.
+          # Installed Python distributions remain scanned from their normal METADATA.
+          skip-files: "**/pip/_vendor/bom.cdx.json"
           exit-code: "1"
 
       - name: Build Mission Control image
@@ -44,6 +49,7 @@ jobs:
       - name: Scan Mission Control image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.73.0
           image-ref: tractusmind-ui:security
           scanners: vuln,secret
           severity: HIGH,CRITICAL
