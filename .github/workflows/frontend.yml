@@ -58,7 +58,7 @@ jobs:
           TRACTUSMIND_OIDC_ISSUER_URL: http://127.0.0.1:8001
           TRACTUSMIND_OIDC_CLIENT_ID: tractusmind-ci
           TRACTUSMIND_OIDC_SCOPES: openid profile email
-          SMOKE_BASE_URL: http://127.0.0.1:3100
+          SMOKE_BASE_URL: http://localhost:3100
         run: |
           npm run mock:backend > /tmp/tractusmind-mock-backend.log 2>&1 &
           BACKEND_PID=$!
@@ -86,9 +86,9 @@ jobs:
           MOCK_BACKEND_HOST=0.0.0.0 npm run mock:backend > /tmp/tractusmind-image-mock-backend.log 2>&1 &
           BACKEND_PID=$!
           UI_CID=$(docker run -d \
-            --add-host=host.docker.internal:host-gateway \
-            -p 127.0.0.1:3101:3000 \
-            -e TRACTUSMIND_API_URL=http://host.docker.internal:8000 \
+            --network host \
+            -e PORT=3101 \
+            -e TRACTUSMIND_API_URL=http://127.0.0.1:8000 \
             tractusmind-ui:ci)
           cleanup() {
             docker rm -f "$UI_CID" >/dev/null 2>&1 || true
@@ -98,6 +98,9 @@ jobs:
           npm run smoke
           npm run smoke:bff
           npm run smoke:oidc-disabled
+
+      - name: Prepare development topology fixture
+        run: cp ../.env.example ../.env
 
       - name: Validate development UI topology
         run: >-
