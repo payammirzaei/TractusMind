@@ -1,7 +1,9 @@
 from dataclasses import asdict
 
 import structlog
+from qdrant_client import AsyncQdrantClient
 from redis.exceptions import LockNotOwnedError
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.config import Settings, get_settings
 from app.infra.postgres import create_postgres_engine
@@ -37,9 +39,11 @@ async def run_source_sync(
         logger.info("source_sync_skipped_locked", source_id=source_id)
         return {"status": "locked", "source_id": source_id}
 
-    engine = create_postgres_engine(resolved_settings)
-    qdrant = create_qdrant_client(resolved_settings)
+    engine: AsyncEngine | None = None
+    qdrant: AsyncQdrantClient | None = None
     try:
+        engine = create_postgres_engine(resolved_settings)
+        qdrant = create_qdrant_client(resolved_settings)
         state = SourceStateStore(engine)
         retrieval = create_hybrid_retrieval_service(resolved_settings, qdrant)
         async with SourceIngestionPipeline(
@@ -56,8 +60,10 @@ async def run_source_sync(
         logger.info("source_sync_succeeded", **payload)
         return payload
     finally:
-        await qdrant.close()
-        await engine.dispose()
+        if qdrant is not None:
+            await qdrant.close()
+        if engine is not None:
+            await engine.dispose()
         try:
             await lock.release()
         except LockNotOwnedError:
