@@ -4,7 +4,7 @@ from app.chunking.common import split_text_by_lines
 from app.chunking.models import ChunkKind, KnowledgeChunk, make_chunk
 from app.ingestion.models import RawDocument
 
-_YAML_TOP_LEVEL_RE = re.compile(r"^([A-Za-z0-9_.-]+)\s*:\s*(?:#.*)?$")
+_YAML_TOP_LEVEL_RE = re.compile(r"^([A-Za-z0-9_.-]+)\s*:")
 _TTL_PREFIX_RE = re.compile(r"^\s*(?:@prefix|PREFIX)\b", re.IGNORECASE)
 
 
@@ -58,8 +58,10 @@ class StructuredChunker:
 
     def _chunk_turtle(self, document: RawDocument) -> list[KnowledgeChunk]:
         lines = document.content.splitlines(keepends=True)
-        prefix_lines = [line.rstrip("\n") for line in lines if _TTL_PREFIX_RE.match(line)]
+        prefix_indices = [index for index, line in enumerate(lines) if _TTL_PREFIX_RE.match(line)]
+        prefix_lines = [lines[index].rstrip("\n") for index in prefix_indices]
         prefix_context = "\n".join(prefix_lines)
+        prefix_start_line = prefix_indices[0] + 1 if prefix_indices else None
 
         chunks: list[KnowledgeChunk] = []
         statement_start: int | None = None
@@ -78,6 +80,7 @@ class StructuredChunker:
             if stripped.endswith("."):
                 statement = "".join(statement_lines).strip()
                 text = f"{prefix_context}\n\n{statement}" if prefix_context else statement
+                chunk_start_line = prefix_start_line or statement_start + 1
                 if len(text) <= self.max_chars:
                     symbol = statement.split(maxsplit=1)[0] if statement else None
                     chunks.append(
@@ -85,7 +88,7 @@ class StructuredChunker:
                             document,
                             kind=ChunkKind.SEMANTIC_ENTITY,
                             text=text,
-                            start_line=statement_start + 1,
+                            start_line=chunk_start_line,
                             end_line=index + 1,
                             symbol=symbol,
                             part=part,
@@ -108,7 +111,7 @@ class StructuredChunker:
                                     if prefix_context
                                     else text_range.text
                                 ),
-                                start_line=text_range.start_line,
+                                start_line=prefix_start_line or text_range.start_line,
                                 end_line=text_range.end_line,
                                 part=text_range.part,
                             )
@@ -123,7 +126,7 @@ class StructuredChunker:
                     document,
                     kind=ChunkKind.SEMANTIC_ENTITY,
                     text=f"{prefix_context}\n\n{trailing}" if prefix_context else trailing,
-                    start_line=statement_start + 1,
+                    start_line=prefix_start_line or statement_start + 1,
                     end_line=len(lines),
                 )
             )
