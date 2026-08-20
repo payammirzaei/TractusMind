@@ -15,6 +15,7 @@ The project intentionally starts with retrieval quality and evaluation before UI
 - FastEmbed + `Qdrant/bm25` for sparse lexical retrieval
 - RRF fusion inside Qdrant for hybrid retrieval
 - FastEmbed cross-encoder reranking with `Xenova/ms-marco-MiniLM-L-6-v2`
+- OpenAI-compatible LLM provider interface for grounded generation
 - PostgreSQL for application and ingestion state
 - Redis + Dramatiq for background ingestion jobs
 - Tree-sitter for AST-aware source-code chunking
@@ -85,6 +86,45 @@ Hybrid indexing enriches retrieval text with repository, component, path, langua
 
 The reranking stage takes a limited hybrid candidate set, scores each query/chunk pair with a cross-encoder, and returns only the strongest evidence. Both the original retrieval score and the reranker score are retained for later debugging and observability.
 
+## Grounded answer generation
+
+Configure any OpenAI-compatible chat-completions provider:
+
+```bash
+LLM_BASE_URL=https://provider.example/v1
+LLM_API_KEY=...
+LLM_MODEL=...
+```
+
+Then ask TractusMind through the API:
+
+```http
+POST /v1/ask
+Content-Type: application/json
+
+{
+  "question": "How do I create an asset with the Tractus-X SDK?"
+}
+```
+
+The production answer path is:
+
+```text
+question
+  -> hybrid retrieval
+  -> cross-encoder reranking
+  -> bounded evidence context
+  -> LLM
+  -> backend-validated citations
+  -> grounded answer or abstention
+```
+
+Evidence IDs such as `[S1]` are assigned by the backend. The LLM is not trusted to invent repository URLs, commit SHAs, paths, or line numbers. Returned citation metadata is mapped back to the exact retrieved chunk after generation.
+
+Source evidence is explicitly treated as untrusted data in the generation prompt to reduce prompt-injection risk. If no usable evidence exists, if the configured relevance cutoff removes all evidence, or if the model invents citation IDs, TractusMind abstains instead of returning a grounded answer.
+
+LLM configuration is lazy: missing `LLM_BASE_URL` or `LLM_MODEL` does not prevent the API from starting. `/v1/ask` returns `503` until a provider is configured.
+
 ## Retrieval benchmark
 
 The fixed retrieval seed is stored in `benchmarks/dense_v0.jsonl`. The runner evaluates all retrieval stages against the exact same indexed collection.
@@ -126,6 +166,7 @@ question
   -> cross-encoder rerank score
   -> final evidence
   -> generated answer
+  -> validated citations
   -> sources + versions
   -> evaluation result
 ```
@@ -134,7 +175,7 @@ See [`docs/architecture.md`](docs/architecture.md) for the current architecture 
 
 ## Current milestone
 
-**V2 — Reranked Hybrid Retrieval**
+**V3 — Grounded Answer Generation**
 
 - [x] FastAPI service shell
 - [x] Qdrant/PostgreSQL/Redis connectivity contract
@@ -160,8 +201,14 @@ See [`docs/architecture.md`](docs/architecture.md) for the current architecture 
 - [x] Cross-encoder reranking with preserved first-stage scores
 - [x] Fixed retrieval benchmark seed
 - [x] Dense vs Hybrid vs Reranked benchmark runner
+- [x] OpenAI-compatible grounded generation provider
+- [x] Backend-owned citation IDs and exact source mapping
+- [x] `/v1/ask` API endpoint
+- [x] Prompt-injection-aware evidence framing
+- [x] Fail-closed citation validation and abstention
 - [ ] calibrated relevance / abstention thresholds
-- [ ] answer generation with grounded citations
+- [ ] claim-level groundedness verifier
+- [ ] answer-level groundedness and citation evaluation
 
 ## License
 
