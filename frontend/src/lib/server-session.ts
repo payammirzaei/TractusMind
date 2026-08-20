@@ -36,6 +36,7 @@ function canonicalRequestOrigin(request: Request) {
  * Production exposes Next only through the trusted Caddy reverse proxy, which
  * supplies the external host/protocol. Direct development traffic falls back to
  * the Host header. A browser explicitly reporting cross-site is always rejected.
+ * This contract is exercised by the full-stack release-candidate gate.
  */
 export function trustedBrowserMutation(request: Request) {
   const fetchSite = request.headers.get("sec-fetch-site")?.toLowerCase();
