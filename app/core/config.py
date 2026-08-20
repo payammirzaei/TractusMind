@@ -5,7 +5,6 @@ import typing
 import pydantic
 import pydantic_settings
 
-
 _SECRET_FILE_FIELDS = {
     "database_url": "database_url_file",
     "redis_url": "redis_url_file",
