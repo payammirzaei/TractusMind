@@ -49,7 +49,8 @@ class Settings(BaseSettings):
     debug_hybrid_weight: float = Field(default=1.0, gt=0.0, le=10.0)
 
     source_sync_interval_seconds: int = Field(default=21_600, ge=300, le=604_800)
-    source_sync_lock_seconds: int = Field(default=43_200, ge=600, le=86_400)
+    source_sync_lock_seconds: int = Field(default=43_200, ge=300, le=604_800)
+    ops_admin_key: str | None = None
 
     s3_endpoint_url: str | None = None
     s3_access_key_id: str | None = None
