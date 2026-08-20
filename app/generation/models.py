@@ -17,6 +17,8 @@ class AnswerCitation(BaseModel):
     source_url: str
     retrieval_score: float | None = None
     rerank_score: float | None = None
+    debug_score: float | None = None
+    retrieval_methods: list[str] = Field(default_factory=list)
 
 
 class ClaimVerdict(BaseModel):
