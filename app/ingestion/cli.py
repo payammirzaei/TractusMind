@@ -7,7 +7,7 @@ from app.core.config import Settings, get_settings
 from app.infra.postgres import create_postgres_engine
 from app.infra.qdrant import create_qdrant_client
 from app.ingestion.pipeline import SourceIngestionPipeline
-from app.ingestion.registry import get_source
+from app.ingestion.registry import get_enabled_sources, get_source
 from app.ingestion.sync import IncrementalSourceSync
 from app.retrieval.factory import (
     create_hybrid_retrieval_service,
@@ -47,6 +47,17 @@ def _parser() -> argparse.ArgumentParser:
     )
     sync.add_argument("source_id")
 
+    enqueue = subparsers.add_parser(
+        "enqueue",
+        help="Queue one incremental source sync for the background worker",
+    )
+    enqueue.add_argument("source_id")
+
+    subparsers.add_parser(
+        "enqueue-all",
+        help="Queue all enabled sources for the background worker",
+    )
+
     search = subparsers.add_parser("search", help="Run routed retrieval against Qdrant")
     search.add_argument("query")
     search.add_argument("--limit", type=int, default=5)
@@ -60,6 +71,21 @@ def _retrieval_services(settings: Settings):
     retrieval = create_hybrid_retrieval_service(settings, qdrant)
     reranked = create_reranked_retrieval_service(settings, qdrant)
     return qdrant, retrieval, reranked
+
+
+def _enqueue_source_ids(source_ids: list[str]) -> None:
+    from app.workers.tasks import sync_source_task
+
+    queued = []
+    for source_id in source_ids:
+        message = sync_source_task.send(source_id)
+        queued.append(
+            {
+                "source_id": source_id,
+                "message_id": message.message_id,
+            }
+        )
+    print(json.dumps({"queued": queued, "count": len(queued)}, indent=2))
 
 
 async def _run_search(args: argparse.Namespace, settings: Settings) -> None:
@@ -169,6 +195,13 @@ async def _run(args: argparse.Namespace) -> None:
         return
     if args.command == "sync":
         await _run_sync(args, settings)
+        return
+    if args.command == "enqueue":
+        source = get_source(args.source_id)
+        _enqueue_source_ids([source.id])
+        return
+    if args.command == "enqueue-all":
+        _enqueue_source_ids([source.id for source in get_enabled_sources()])
         return
 
     source = get_source(args.source_id)
