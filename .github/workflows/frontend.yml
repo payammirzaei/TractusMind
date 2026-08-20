@@ -5,10 +5,20 @@ on:
     branches: [main]
     paths:
       - "frontend/**"
+      - "docker-compose.yml"
+      - "docker-compose.prod.yml"
+      - "docker-compose.ui.yml"
+      - "docker-compose.ui.prod.yml"
+      - "config/Caddyfile.ui.prod"
       - ".github/workflows/frontend.yml"
   pull_request:
     paths:
       - "frontend/**"
+      - "docker-compose.yml"
+      - "docker-compose.prod.yml"
+      - "docker-compose.ui.yml"
+      - "docker-compose.ui.prod.yml"
+      - "config/Caddyfile.ui.prod"
       - ".github/workflows/frontend.yml"
 
 permissions:
@@ -43,3 +53,21 @@ jobs:
 
       - name: Build runtime image
         run: docker build -t tractusmind-ui:ci .
+
+      - name: Validate development UI topology
+        run: >-
+          docker compose
+          -f ../docker-compose.yml
+          -f ../docker-compose.ui.yml
+          config --quiet
+
+      - name: Prepare production topology fixture
+        run: cp ../.env.production.example ../.env.production
+
+      - name: Validate production UI topology
+        run: >-
+          docker compose
+          --env-file ../.env.production
+          -f ../docker-compose.prod.yml
+          -f ../docker-compose.ui.prod.yml
+          config --quiet
