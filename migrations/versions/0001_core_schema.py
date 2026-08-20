@@ -6,8 +6,8 @@ Revises:
 
 from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision: str = "0001_core_schema"
 down_revision: str | Sequence[str] | None = None
@@ -60,7 +60,11 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("source_id", "path"),
     )
-    op.create_index("ix_source_file_state_blob_sha", "source_file_state", ["blob_sha"])
+    op.create_index(
+        "ix_source_file_state_blob_sha",
+        "source_file_state",
+        ["blob_sha"],
+    )
     op.create_index(
         "ix_source_file_state_last_seen_snapshot_commit_sha",
         "source_file_state",
@@ -157,11 +161,31 @@ def upgrade() -> None:
         "answer_interaction",
         ["conversation_id"],
     )
-    op.create_index("ix_answer_interaction_request_id", "answer_interaction", ["request_id"])
-    op.create_index("ix_answer_interaction_status", "answer_interaction", ["status"])
-    op.create_index("ix_answer_interaction_intent", "answer_interaction", ["intent"])
-    op.create_index("ix_answer_interaction_trace_id", "answer_interaction", ["trace_id"])
-    op.create_index("ix_answer_interaction_created_at", "answer_interaction", ["created_at"])
+    op.create_index(
+        "ix_answer_interaction_request_id",
+        "answer_interaction",
+        ["request_id"],
+    )
+    op.create_index(
+        "ix_answer_interaction_status",
+        "answer_interaction",
+        ["status"],
+    )
+    op.create_index(
+        "ix_answer_interaction_intent",
+        "answer_interaction",
+        ["intent"],
+    )
+    op.create_index(
+        "ix_answer_interaction_trace_id",
+        "answer_interaction",
+        ["trace_id"],
+    )
+    op.create_index(
+        "ix_answer_interaction_created_at",
+        "answer_interaction",
+        ["created_at"],
+    )
 
     op.create_table(
         "answer_feedback",
@@ -224,11 +248,23 @@ def upgrade() -> None:
             name="uq_quality_review_interaction_trigger",
         ),
     )
-    op.create_index("ix_quality_review_interaction_id", "quality_review", ["interaction_id"])
+    op.create_index(
+        "ix_quality_review_interaction_id",
+        "quality_review",
+        ["interaction_id"],
+    )
     op.create_index("ix_quality_review_trigger", "quality_review", ["trigger"])
     op.create_index("ix_quality_review_status", "quality_review", ["status"])
-    op.create_index("ix_quality_review_root_cause", "quality_review", ["root_cause"])
-    op.create_index("ix_quality_review_created_at", "quality_review", ["created_at"])
+    op.create_index(
+        "ix_quality_review_root_cause",
+        "quality_review",
+        ["root_cause"],
+    )
+    op.create_index(
+        "ix_quality_review_created_at",
+        "quality_review",
+        ["created_at"],
+    )
 
     op.create_table(
         "regression_case",
@@ -262,7 +298,11 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("case_id"),
         sa.UniqueConstraint("review_id", name="uq_regression_case_review"),
     )
-    op.create_index("ix_regression_case_review_id", "regression_case", ["review_id"])
+    op.create_index(
+        "ix_regression_case_review_id",
+        "regression_case",
+        ["review_id"],
+    )
     op.create_index(
         "ix_regression_case_interaction_id",
         "regression_case",
@@ -273,8 +313,16 @@ def upgrade() -> None:
         "regression_case",
         ["benchmark_kind"],
     )
-    op.create_index("ix_regression_case_root_cause", "regression_case", ["root_cause"])
-    op.create_index("ix_regression_case_created_at", "regression_case", ["created_at"])
+    op.create_index(
+        "ix_regression_case_root_cause",
+        "regression_case",
+        ["root_cause"],
+    )
+    op.create_index(
+        "ix_regression_case_created_at",
+        "regression_case",
+        ["created_at"],
+    )
 
 
 def downgrade() -> None:
