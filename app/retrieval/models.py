@@ -13,6 +13,7 @@ class RetrievalHit(BaseModel):
     repository: str
     component: str
     version_ref: str | None = None
+    snapshot_commit_sha: str | None = None
     commit_sha: str
     path: str
     content_type: str
