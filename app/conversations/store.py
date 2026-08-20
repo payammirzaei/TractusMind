@@ -3,12 +3,17 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
+from app.conversations.history import ConversationTurn
 from app.conversations.models import AnswerFeedback, AnswerInteraction, Conversation
 from app.generation.models import GroundedAnswer
 from app.state.models import Base
+
+
+class ConversationAccessError(RuntimeError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -24,6 +29,13 @@ class FeedbackRecord:
     rating: str
     reason: str | None
     comment: str | None
+
+
+@dataclass(frozen=True)
+class ConversationRecord:
+    conversation_id: str
+    created_at: datetime
+    updated_at: datetime
 
 
 @dataclass(frozen=True)
@@ -53,7 +65,7 @@ class InteractionRecord:
 
 
 class ConversationStore:
-    """Persist answer traces and one mutable feedback record per interaction."""
+    """Persist answer traces and enforce optional authenticated conversation ownership."""
 
     def __init__(self, engine: AsyncEngine) -> None:
         self.engine = engine
@@ -69,7 +81,103 @@ class ConversationStore:
                 return
             async with self.engine.begin() as connection:
                 await connection.run_sync(Base.metadata.create_all)
+                await connection.execute(
+                    text(
+                        "ALTER TABLE conversation "
+                        "ADD COLUMN IF NOT EXISTS owner_user_id VARCHAR(36)"
+                    )
+                )
+                await connection.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_conversation_owner_user_id "
+                        "ON conversation (owner_user_id)"
+                    )
+                )
             self._schema_ready = True
+
+    async def assert_conversation_access(
+        self,
+        *,
+        conversation_id: str,
+        owner_user_id: str | None,
+    ) -> bool:
+        await self.ensure_schema()
+        async with self.sessions() as session:
+            conversation = await session.get(Conversation, conversation_id)
+        if conversation is None:
+            return False
+        if conversation.owner_user_id != owner_user_id:
+            raise ConversationAccessError("conversation is not available")
+        return True
+
+    async def load_history(
+        self,
+        *,
+        conversation_id: str,
+        owner_user_id: str,
+        limit: int,
+        max_chars: int,
+    ) -> list[ConversationTurn]:
+        exists = await self.assert_conversation_access(
+            conversation_id=conversation_id,
+            owner_user_id=owner_user_id,
+        )
+        if not exists:
+            return []
+
+        statement = (
+            select(AnswerInteraction)
+            .where(
+                AnswerInteraction.conversation_id == conversation_id,
+                AnswerInteraction.status == "completed",
+            )
+            .order_by(AnswerInteraction.created_at.desc())
+            .limit(limit)
+        )
+        async with self.sessions() as session:
+            interactions = (await session.scalars(statement)).all()
+
+        selected: list[ConversationTurn] = []
+        used = 0
+        for interaction in interactions:
+            if not interaction.answer:
+                continue
+            cost = len(interaction.question) + len(interaction.answer) + 32
+            if used + cost > max_chars:
+                break
+            selected.append(
+                ConversationTurn(
+                    question=interaction.question,
+                    answer=interaction.answer,
+                )
+            )
+            used += cost
+        selected.reverse()
+        return selected
+
+    async def list_owned_conversations(
+        self,
+        *,
+        owner_user_id: str,
+        limit: int = 100,
+    ) -> list[ConversationRecord]:
+        await self.ensure_schema()
+        statement = (
+            select(Conversation)
+            .where(Conversation.owner_user_id == owner_user_id)
+            .order_by(Conversation.updated_at.desc())
+            .limit(limit)
+        )
+        async with self.sessions() as session:
+            conversations = (await session.scalars(statement)).all()
+        return [
+            ConversationRecord(
+                conversation_id=conversation.conversation_id,
+                created_at=conversation.created_at,
+                updated_at=conversation.updated_at,
+            )
+            for conversation in conversations
+        ]
 
     async def record_answer(
         self,
@@ -77,6 +185,7 @@ class ConversationStore:
         question: str,
         answer: GroundedAnswer,
         conversation_id: str | None,
+        owner_user_id: str | None,
         request_id: str | None,
         stage_durations: dict[str, float],
         total_duration_seconds: float,
@@ -89,9 +198,13 @@ class ConversationStore:
         async with self.sessions.begin() as session:
             conversation = await session.get(Conversation, resolved_conversation_id)
             if conversation is None:
-                conversation = Conversation(conversation_id=resolved_conversation_id)
+                conversation = Conversation(
+                    conversation_id=resolved_conversation_id,
+                    owner_user_id=owner_user_id,
+                )
                 session.add(conversation)
             else:
+                self._require_owner(conversation, owner_user_id)
                 conversation.updated_at = datetime.now(UTC)
 
             route_json = answer.route.model_dump(mode="json") if answer.route else None
@@ -134,6 +247,7 @@ class ConversationStore:
         *,
         question: str,
         conversation_id: str | None,
+        owner_user_id: str | None,
         request_id: str | None,
         error_type: str,
         stage_durations: dict[str, float],
@@ -152,8 +266,14 @@ class ConversationStore:
         async with self.sessions.begin() as session:
             conversation = await session.get(Conversation, resolved_conversation_id)
             if conversation is None:
-                session.add(Conversation(conversation_id=resolved_conversation_id))
+                session.add(
+                    Conversation(
+                        conversation_id=resolved_conversation_id,
+                        owner_user_id=owner_user_id,
+                    )
+                )
             else:
+                self._require_owner(conversation, owner_user_id)
                 conversation.updated_at = datetime.now(UTC)
 
             session.add(
@@ -187,6 +307,7 @@ class ConversationStore:
         self,
         *,
         interaction_id: str,
+        actor_user_id: str | None,
         rating: str,
         reason: str | None,
         comment: str | None,
@@ -196,6 +317,11 @@ class ConversationStore:
             interaction = await session.get(AnswerInteraction, interaction_id)
             if interaction is None or interaction.status != "completed":
                 return None
+            conversation = await session.get(Conversation, interaction.conversation_id)
+            if conversation is None:
+                return None
+            if conversation.owner_user_id is not None:
+                self._require_owner(conversation, actor_user_id)
 
             feedback = await session.scalar(
                 select(AnswerFeedback).where(
@@ -282,6 +408,11 @@ class ConversationStore:
                 )
             ).all()
         return {str(rating): int(count) for rating, count in rows}
+
+    @staticmethod
+    def _require_owner(conversation: Conversation, owner_user_id: str | None) -> None:
+        if conversation.owner_user_id != owner_user_id:
+            raise ConversationAccessError("conversation is not available")
 
     def _interaction_record(
         self,
