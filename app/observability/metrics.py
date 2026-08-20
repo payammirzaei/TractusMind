@@ -5,6 +5,8 @@ from time import perf_counter
 from opentelemetry import trace
 from prometheus_client import Counter, Gauge, Histogram
 
+from app.observability.trace_context import record_stage_duration
+
 HTTP_REQUESTS = Counter(
     "tractusmind_http_requests_total",
     "HTTP requests handled by the API.",
@@ -29,6 +31,11 @@ ANSWERS = Counter(
     "tractusmind_answers_total",
     "Final answer outcomes.",
     ("intent", "outcome"),
+)
+FEEDBACK = Counter(
+    "tractusmind_answer_feedback_total",
+    "User feedback submitted for persisted answers.",
+    ("rating",),
 )
 RETRIEVAL_RESULTS = Histogram(
     "tractusmind_retrieval_results",
@@ -101,9 +108,9 @@ def observe_stage(stage: str, intent: str = "unknown") -> Iterator[None]:
             PIPELINE_STAGE_ERRORS.labels(stage=stage, intent=intent).inc()
             raise
         finally:
-            PIPELINE_STAGE_DURATION.labels(stage=stage, intent=intent).observe(
-                perf_counter() - started
-            )
+            duration = perf_counter() - started
+            PIPELINE_STAGE_DURATION.labels(stage=stage, intent=intent).observe(duration)
+            record_stage_duration(stage, duration)
 
 
 @contextmanager
