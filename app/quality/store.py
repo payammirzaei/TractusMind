@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.conversations.models import AnswerFeedback, AnswerInteraction
@@ -71,18 +72,26 @@ class QualityStore:
             interaction = await session.get(AnswerInteraction, interaction_id)
             if interaction is None:
                 return None
+            inserted = await session.scalar(
+                pg_insert(QualityReview)
+                .values(interaction_id=interaction_id, trigger=trigger)
+                .on_conflict_do_nothing(
+                    index_elements=[
+                        QualityReview.interaction_id,
+                        QualityReview.trigger,
+                    ]
+                )
+                .returning(QualityReview.review_id)
+            )
+            if inserted is not None:
+                return str(inserted)
             existing = await session.scalar(
-                select(QualityReview).where(
+                select(QualityReview.review_id).where(
                     QualityReview.interaction_id == interaction_id,
                     QualityReview.trigger == trigger,
                 )
             )
-            if existing is not None:
-                return existing.review_id
-            review = QualityReview(interaction_id=interaction_id, trigger=trigger)
-            session.add(review)
-            await session.flush()
-            return review.review_id
+            return str(existing) if existing is not None else None
 
     def _review_statement(self):
         return (
@@ -217,6 +226,12 @@ class QualityStore:
                 )
             ).all()
         return {str(status): int(count) for status, count in rows}
+
+    async def regression_count(self) -> int:
+        await self.ensure_schema()
+        async with self.sessions() as session:
+            value = await session.scalar(select(func.count()).select_from(RegressionCase))
+        return int(value or 0)
 
     def _review_record(
         self,
