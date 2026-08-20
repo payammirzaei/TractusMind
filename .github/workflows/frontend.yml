@@ -71,6 +71,25 @@ jobs:
       - name: Build runtime image
         run: docker build -t tractusmind-ui:ci .
 
+      - name: Smoke built runtime image
+        env:
+          SMOKE_BASE_URL: http://127.0.0.1:3101
+        run: |
+          MOCK_BACKEND_HOST=0.0.0.0 npm run mock:backend > /tmp/tractusmind-image-mock-backend.log 2>&1 &
+          BACKEND_PID=$!
+          UI_CID=$(docker run -d \
+            --add-host=host.docker.internal:host-gateway \
+            -p 127.0.0.1:3101:3000 \
+            -e TRACTUSMIND_API_URL=http://host.docker.internal:8000 \
+            tractusmind-ui:ci)
+          cleanup() {
+            docker rm -f "$UI_CID" >/dev/null 2>&1 || true
+            kill "$BACKEND_PID" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          npm run smoke
+          npm run smoke:bff
+
       - name: Validate development UI topology
         run: >-
           docker compose
