@@ -21,6 +21,7 @@ inspectability, and measurable evaluation come before UI work.
 - PostgreSQL source/file state + ingestion-run history
 - Redis + Dramatiq background ingestion
 - Protected ingestion operations API
+- Prometheus metrics + optional OpenTelemetry traces
 - Tree-sitter structure-aware code chunking
 - Docker / Docker Compose
 - GitHub Actions
@@ -36,6 +37,8 @@ Services:
 
 - API: `http://localhost:8000`
 - OpenAPI: `http://localhost:8000/docs`
+- API metrics: `http://localhost:8000/metrics`
+- Prometheus: `http://localhost:9090`
 - Qdrant: `http://localhost:6333/dashboard`
 - Dramatiq ingestion worker
 - scheduled source-sync service
@@ -204,6 +207,48 @@ Successful enqueue operations return `202 Accepted` and the Dramatiq message ID.
 runs keep their persisted delta counters and error details for operator inspection.
 
 See [`docs/operations.md`](docs/operations.md).
+
+## Observability
+
+The local Compose stack includes Prometheus at `http://localhost:9090`. It scrapes four process
+surfaces:
+
+```text
+api:8000/metrics       -> HTTP + answer-pipeline metrics
+worker:9101/metrics    -> TractusMind ingestion/model/worker metrics
+worker:9191/           -> native Dramatiq queue/runtime metrics
+scheduler:9102/metrics -> scheduled enqueue metrics
+```
+
+The API records latency using FastAPI **route templates**, not arbitrary request paths. Grounded
+answer stages expose separate retrieval, generation, and verification latency plus answer-outcome
+counters. Dense, sparse, and reranker runtime metrics expose first-use warm-up and operation
+latency. Background ingestion exposes success/failure/lock-contention counts, duration, and file
+delta classifications.
+
+Every normal API response gets `X-Request-ID`, and the same value is bound into structured log
+context. When OpenTelemetry tracing is active, the trace ID is bound to logs as well.
+
+Metric labels are intentionally low-cardinality. User questions, source-code text, error messages,
+raw paths, commit SHAs, chunk IDs, request IDs, trace IDs, and credentials are never metric labels.
+
+Metrics are open only in development. In non-development environments configure
+`METRICS_ADMIN_KEY` or reuse `OPS_ADMIN_KEY` and send `X-TractusMind-Metrics-Key` when scraping the
+API endpoint. Worker/scheduler metric ports are intended for private-network scraping.
+
+Optional OTLP/HTTP traces:
+
+```bash
+OTEL_TRACES_ENDPOINT=http://otel-collector:4318/v1/traces
+OTEL_SERVICE_NAME=tractusmind-api
+OTEL_SAMPLE_RATIO=1.0
+```
+
+Without `OTEL_TRACES_ENDPOINT`, tracing export is disabled. With it configured, FastAPI creates the
+server span and TractusMind adds child spans for retrieval, generation, and verification.
+
+See [`docs/observability.md`](docs/observability.md) for metric families, security rules, and
+example PromQL.
 
 ## Smart chunking
 
@@ -383,7 +428,7 @@ See [`docs/architecture.md`](docs/architecture.md).
 
 ## Current milestone
 
-**V10 — Ingestion Operations + Observability API**
+**V11 — Prometheus + OpenTelemetry Observability**
 
 - [x] source-grounded FastAPI query service
 - [x] allowlisted Tractus-X source registry
@@ -397,23 +442,23 @@ See [`docs/architecture.md`](docs/architecture.md).
 - [x] atomic claim verification + fail-closed answer gate
 - [x] retrieval/answer evaluation and abstention calibration tooling
 - [x] PostgreSQL source/file state
-- [x] added/modified/deleted/unchanged delta planning
 - [x] incremental fetch/chunk/embed/index
 - [x] snapshot-commit versus content-commit provenance
 - [x] ingestion-run audit history
 - [x] Dramatiq background source-sync actor
 - [x] Redis distributed per-source lock
 - [x] configurable scheduled sync of all enabled sources
-- [x] CLI queue controls
-- [x] Docker worker + scheduler topology
 - [x] admin-key-protected operations API
-- [x] source snapshot/file-count/lock observability
-- [x] latest run and failed-run visibility
-- [x] authenticated HTTP ingestion enqueue controls
+- [x] source/run/failure/lock operations visibility
+- [x] Prometheus API/RAG/model/ingestion/scheduler metrics
+- [x] native Dramatiq queue/runtime Prometheus metrics
+- [x] route-template HTTP latency + request-ID log correlation
+- [x] optional OTLP/HTTP OpenTelemetry traces
+- [x] retrieval/generation/verification trace spans
+- [x] local Prometheus Compose service and scrape configuration
 - [ ] run full-corpus debug benchmark and tune fusion weights
 - [ ] run full-corpus abstention calibration and persist the measured threshold
-- [ ] add Prometheus/OpenTelemetry latency and queue metrics
-- [ ] add model-cache/runtime diagnostics
+- [ ] add production Grafana dashboards/alerts after measured traffic exists
 
 ## License
 
