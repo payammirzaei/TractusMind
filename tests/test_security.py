@@ -60,13 +60,16 @@ def test_rate_limit_returns_retry_after() -> None:
     assert int(limited.headers["retry-after"]) >= 1
 
 
-def test_settings_load_secret_file(tmp_path: Path) -> None:
+def test_settings_load_secret_file_with_precedence(tmp_path: Path) -> None:
     secret = tmp_path / "ops-key"
-    secret.write_text("super-secret\n", encoding="utf-8")
+    secret.write_text("file-secret\n", encoding="utf-8")
 
-    settings = Settings(ops_admin_key=None, ops_admin_key_file=str(secret))
+    settings = Settings(
+        ops_admin_key="plaintext-value",
+        ops_admin_key_file=str(secret),
+    )
 
-    assert settings.ops_admin_key == "super-secret"
+    assert settings.ops_admin_key == "file-secret"
 
 
 def test_settings_parse_trusted_hosts_and_cors() -> None:
