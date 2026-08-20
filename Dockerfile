@@ -8,9 +8,10 @@ WORKDIR /app
 
 RUN groupadd --system app && useradd --system --gid app --create-home app
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md alembic.ini ./
 COPY app ./app
 COPY config ./config
+COPY migrations ./migrations
 RUN pip install --upgrade pip && pip install .
 
 USER app
