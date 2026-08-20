@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 import structlog
 from fastapi import FastAPI
 
+from app.api.routes.ask import router as ask_router
 from app.api.routes.health import router as health_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
@@ -21,10 +22,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.postgres = create_postgres_engine(settings)
     app.state.redis = create_redis_client(settings)
     app.state.qdrant = create_qdrant_client(settings)
+    app.state.answer_service = None
     logger.info("application_started", environment=settings.app_env)
 
     yield
 
+    if app.state.answer_service is not None:
+        await app.state.answer_service.close()
     await app.state.postgres.dispose()
     await app.state.redis.aclose()
     await app.state.qdrant.close()
@@ -38,6 +42,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(health_router)
+app.include_router(ask_router)
 
 
 @app.get("/", tags=["system"])
