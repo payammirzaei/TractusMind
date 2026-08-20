@@ -150,7 +150,11 @@ class CodeChunker:
         return source_bytes[name_node.start_byte : name_node.end_byte].decode("utf-8").strip()
 
     def _include_python_decorators(self, node: Node, language: str) -> Node:
-        if language == "python" and node.parent is not None and node.parent.type == "decorated_definition":
+        if (
+            language == "python"
+            and node.parent is not None
+            and node.parent.type == "decorated_definition"
+        ):
             return node.parent
         return node
 
