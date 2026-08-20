@@ -19,9 +19,12 @@ inspectability, and measurable evaluation come before UI work.
 - OpenAI-compatible grounded generation
 - Claim-level answer verification
 - PostgreSQL source/file state + ingestion-run history
-- PostgreSQL conversation, answer-trace, citation, verification, and feedback persistence
+- PostgreSQL conversation, answer-trace, citation, verification, feedback, and quality-review state
+- Opaque bearer API keys + authenticated user-owned conversation history
 - Redis + Dramatiq background ingestion
-- Protected ingestion and interaction operations API
+- Protected ingestion, interaction, user, and quality operations API
+- Feedback-driven reviewed regression cases
+- Production quality-gate CLI + GitHub Actions workflow
 - Prometheus metrics + optional OpenTelemetry traces
 - Tree-sitter structure-aware code chunking
 - Docker / Docker Compose
@@ -165,9 +168,9 @@ The worker actor retries runtime failures through the same idempotent incrementa
 
 See [`docs/background-ingestion.md`](docs/background-ingestion.md).
 
-## Ingestion operations API
+## Operations API
 
-Source maintenance is inspectable and triggerable through a protected internal API. Configure a
+Source maintenance and internal quality state are inspectable through a protected API. Configure a
 strong admin key:
 
 ```bash
@@ -183,7 +186,7 @@ X-TractusMind-Admin-Key: replace-with-a-long-random-secret
 If the key is not configured, the entire `/v1/ops/*` surface returns `503`; it never silently
 falls back to public access.
 
-Read operations:
+Core reads:
 
 ```text
 GET /v1/ops/summary
@@ -193,27 +196,29 @@ GET /v1/ops/runs
 GET /v1/ops/runs/{run_id}
 GET /v1/ops/interactions
 GET /v1/ops/feedback/summary
+GET /v1/ops/users
+GET /v1/ops/quality/summary
+GET /v1/ops/quality/reviews
+GET /v1/ops/quality/regressions
 ```
 
-The source view merges the static registry with PostgreSQL and Redis state. It exposes current
-snapshot provenance, indexed-file count, lock state, last successful run, and the latest run even
-when that latest run failed or is still running.
-
-The interaction view exposes persisted question/answer state, route, citations, verification,
-request-local stage durations, OpenTelemetry trace ID when available, and feedback. It is kept
-behind the admin key because public conversation-history ownership does not exist yet.
-
-Manual triggers enqueue work instead of running ingestion inside the HTTP request:
+Manual source triggers enqueue work instead of running ingestion inside the HTTP request:
 
 ```text
 POST /v1/ops/sources/{source_id}/sync
 POST /v1/ops/sync
 ```
 
-Successful enqueue operations return `202 Accepted` and the Dramatiq message ID. Failed ingestion
-runs keep their persisted delta counters and error details for operator inspection.
+User credential administration is also protected by the same admin key:
 
-See [`docs/operations.md`](docs/operations.md).
+```text
+POST  /v1/ops/users
+POST  /v1/ops/users/{user_id}/rotate
+PATCH /v1/ops/users/{user_id}
+```
+
+See [`docs/operations.md`](docs/operations.md), [`docs/quality-loop.md`](docs/quality-loop.md), and
+[`docs/authenticated-conversations.md`](docs/authenticated-conversations.md).
 
 ## Observability
 
@@ -362,10 +367,11 @@ Production answer path:
 
 ```text
 question
+  -> optional authenticated bounded history context
   -> routing
   -> retrieval
   -> reranking
-  -> bounded evidence context
+  -> bounded source-evidence context
   -> grounded LLM generation
   -> backend citation validation
   -> atomic claim verification
@@ -376,19 +382,30 @@ The backend owns evidence IDs such as `[S1]`. The model is not trusted to invent
 source IDs, refs, commits, paths, or line numbers. Structured citation IDs must match inline
 citations, and unsupported claims fail closed.
 
-## Conversation, trace, and feedback persistence
+## Authenticated conversations, trace, and feedback
 
-Completed and failed answer requests are persisted in PostgreSQL. A persisted completed response
-returns two opaque UUIDs:
+Completed and failed answer requests are persisted in PostgreSQL. Anonymous `/v1/ask` remains
+supported, but anonymous history is never loaded into generation.
 
-```json
-{
-  "interaction_id": "...",
-  "conversation_id": "..."
-}
+Administrators can create an end-user credential through `/v1/ops/users`. The plaintext opaque API
+key is returned once; PostgreSQL stores only its SHA-256 digest and short prefix. Clients send it as:
+
+```http
+Authorization: Bearer tm_...
 ```
 
-The next request can reuse `conversation_id` to keep related turns grouped:
+Authenticated conversations store an `owner_user_id`. A user can continue or read only their own
+conversation. Cross-user access deliberately returns `404` so conversation existence is not leaked.
+Existing anonymous conversations are never automatically claimed.
+
+User-owned history endpoints:
+
+```text
+GET /v1/conversations
+GET /v1/conversations/{conversation_id}
+```
+
+A later authenticated request can reuse its owned `conversation_id`:
 
 ```json
 {
@@ -397,38 +414,45 @@ The next request can reuse `conversation_id` to keep related turns grouped:
 }
 ```
 
-Conversation grouping does **not** automatically add previous turns to the generation prompt.
-History selection and token budgeting remain a separate future policy.
+Only completed recent turns are loaded, bounded by:
 
-Each `answer_interaction` stores the final answer outcome plus route, citations, verification,
-model, evidence count, total duration, OpenTelemetry trace ID when active, and request-local stage
-durations. The same request-local collector also records dense/sparse/reranker operation timing
-when those operations are instrumented.
-
-Clients can submit or update one feedback record per completed interaction:
-
-```http
-POST /v1/feedback
-Content-Type: application/json
-
-{
-  "interaction_id": "...",
-  "rating": "down",
-  "reason": "citation",
-  "comment": "The cited evidence does not support the exact claim."
-}
+```bash
+HISTORY_MAX_TURNS=6
+HISTORY_MAX_CHARS=6000
 ```
 
-Feedback accepts `up` or `down`. Unknown or failed interactions are rejected. Re-submission updates
-the existing feedback instead of creating duplicate contradictory votes.
+Conversation history is explicitly marked as context, **not evidence**. It cannot be cited. Short
+context-dependent follow-ups may use the previous user question to improve routing/retrieval, but
+previous assistant answers never become source evidence. Atomic claim verification still uses the
+current question and current source evidence.
 
-Persistence is best-effort: a valid generated answer is not converted into an HTTP failure merely
-because its analytics write failed. Failed generation/runtime requests are also persisted on a
-best-effort basis with safe error type and captured timing data.
+Feedback on an authenticated interaction is accepted only from the owning user. Anonymous
+interactions retain the existing capability-style feedback behavior.
 
-See [`docs/conversation-feedback.md`](docs/conversation-feedback.md).
+See [`docs/conversation-feedback.md`](docs/conversation-feedback.md) and
+[`docs/authenticated-conversations.md`](docs/authenticated-conversations.md).
 
-## Evaluation
+## Feedback-driven quality loop
+
+Failed answer interactions and down-voted answers create idempotent quality-review candidates. Raw
+feedback is a signal, not ground truth. An admin must classify a root cause and explicitly dismiss
+or promote the review.
+
+Supported root-cause classes include routing, retrieval, citation, generation, verification,
+source-data, and versioning problems. Promoted cases become immutable reviewed regression cases and
+can be exported in benchmark-compatible NDJSON.
+
+Reviewed regression files live under:
+
+```text
+benchmarks/regressions/retrieval.jsonl
+benchmarks/regressions/debug.jsonl
+benchmarks/regressions/answer.jsonl
+```
+
+See [`docs/quality-loop.md`](docs/quality-loop.md).
+
+## Evaluation and production quality gate
 
 General retrieval benchmark:
 
@@ -445,9 +469,6 @@ tractusmind-benchmark \
   --k 5
 ```
 
-Current retrieval metrics include evidence hit rate, MRR, NDCG@K, first relevant rank, route, and
-source trace.
-
 Calibrate abstention without an LLM call:
 
 ```bash
@@ -460,15 +481,30 @@ Run end-to-end answer evaluation with an LLM configured:
 tractusmind-answer-eval evaluate
 ```
 
-Answer metrics include grounded answer accuracy, citation correctness, claim support rate, false
-abstention rate, and unsafe answer rate.
+Enforce versioned safety/regression contracts from generated reports:
+
+```bash
+tractusmind-quality-gate \
+  --calibration calibration.json \
+  --answer answer.json \
+  --require-pinned-threshold
+```
+
+The live `.github/workflows/quality-gate.yml` uses the real indexed Qdrant corpus and configured LLM
+when quality-gate secrets are available. Seed MRR/NDCG/recall remain report-only until measured
+full-corpus baselines are pinned. Hard invariants already require zero unsafe answer/evidence accept
+rate and 100% pass for reviewed regressions.
+
+See [`docs/quality-gate.md`](docs/quality-gate.md).
 
 ## Inspectability principle
 
 No hidden RAG magic. A production answer should remain inspectable as:
 
 ```text
-question
+authenticated identity / anonymous
+  -> owned bounded history when eligible
+  -> question
   -> route
   -> source/ref/snapshot filter
   -> dense/sparse/exact candidates
@@ -483,13 +519,15 @@ question
   -> answer or abstention
   -> persisted interaction + timings + trace ID
   -> optional user feedback
+  -> optional human quality review
+  -> reviewed regression gate
 ```
 
 See [`docs/architecture.md`](docs/architecture.md).
 
 ## Current milestone
 
-**V12 — Conversation + Feedback + Trace Persistence**
+**V15 — Authenticated User-Owned Conversations + Safe History Context**
 
 - [x] source-grounded FastAPI query service
 - [x] allowlisted Tractus-X source registry
@@ -515,19 +553,25 @@ See [`docs/architecture.md`](docs/architecture.md).
 - [x] native Dramatiq queue/runtime Prometheus metrics
 - [x] route-template HTTP latency + request-ID log correlation
 - [x] optional OTLP/HTTP OpenTelemetry traces
-- [x] retrieval/generation/verification trace spans
-- [x] local Prometheus Compose service and scrape configuration
 - [x] persisted conversations and completed/failed interactions
-- [x] persisted route/citation/verification snapshots
-- [x] request-local pipeline and model-operation timing persistence
-- [x] OpenTelemetry trace-ID correlation in interaction records
-- [x] up/down feedback endpoint with one mutable vote per interaction
-- [x] protected interaction and feedback inspection endpoints
+- [x] up/down feedback + protected interaction inspection
+- [x] automatic failed/down-vote quality-review capture
+- [x] human root-cause review + immutable regression promotion
+- [x] benchmark-compatible reviewed regression export
+- [x] production quality-gate CLI and live workflow
+- [x] opaque bearer user credentials with hashed-at-rest keys
+- [x] admin create/rotate/disable user credential lifecycle
+- [x] authenticated conversation ownership and fail-closed cross-user access
+- [x] bounded owned conversation history in generation
+- [x] contextual follow-up retrieval using previous user question only
+- [x] authenticated feedback ownership enforcement
+- [x] authenticated owned history read API
 - [ ] run full-corpus debug benchmark and tune fusion weights
-- [ ] run full-corpus abstention calibration and persist the measured threshold
-- [ ] promote reviewed production failures/down-votes into regression benchmark cases
-- [ ] add authenticated user-owned conversation history before history enters prompts
+- [ ] run live full-corpus abstention calibration and pin the measured threshold
+- [ ] promote reviewed real production cases into committed regression files
+- [ ] add versioned database migrations before externally managed schema deployment
 - [ ] add production Grafana dashboards/alerts after measured traffic exists
+- [ ] add OIDC/JWKS identity adapter if external enterprise SSO is required
 
 ## License
 
