@@ -13,7 +13,8 @@ user down-vote            -> trigger=feedback_down
 ```
 
 Capture is idempotent per `(interaction_id, trigger)`. A repeated worker failure or repeated
-negative feedback does not create duplicate review rows.
+negative feedback does not create duplicate review rows. Capture uses PostgreSQL conflict handling
+so concurrent duplicate signals remain safe.
 
 An up-vote does not create a review. If a user changes a previous down-vote to up, the existing
 review remains auditable and shows the current feedback value so an operator can dismiss it.
@@ -75,7 +76,7 @@ GET  /v1/ops/quality/reviews
 GET  /v1/ops/quality/reviews/{review_id}
 POST /v1/ops/quality/reviews/{review_id}/decision
 GET  /v1/ops/quality/regressions
-GET  /v1/ops/quality/regressions/export
+GET  /v1/ops/quality/regressions/export?benchmark_kind=<kind>
 ```
 
 Useful filters:
@@ -105,7 +106,9 @@ Content-Type: application/json
 
 ## Benchmark export
 
-`/regressions/export` returns NDJSON that matches the existing benchmark loaders.
+`/regressions/export` requires `benchmark_kind=retrieval|debug|answer` and returns NDJSON that
+matches the corresponding existing benchmark loader. The kind is required so retrieval-shaped and
+answer-shaped rows cannot be mixed into one ambiguous file.
 
 Retrieval/debug export rows contain:
 
