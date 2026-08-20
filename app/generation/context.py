@@ -26,6 +26,7 @@ class GroundedContext:
                 repository=block.hit.repository,
                 component=block.hit.component,
                 version_ref=block.hit.version_ref,
+                snapshot_commit_sha=block.hit.snapshot_commit_sha,
                 commit_sha=block.hit.commit_sha,
                 path=block.hit.path,
                 start_line=block.hit.start_line,
@@ -47,7 +48,8 @@ def _render_block(citation_id: str, hit: RetrievalHit) -> str:
         f"repository: {hit.repository}",
         f"component: {hit.component}",
         f"version_ref: {hit.version_ref or 'unknown'}",
-        f"commit: {hit.commit_sha}",
+        f"snapshot_commit: {hit.snapshot_commit_sha or 'unknown'}",
+        f"content_commit: {hit.commit_sha}",
         f"path: {hit.path}",
         f"lines: {hit.start_line}-{hit.end_line}",
     ]
