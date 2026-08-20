@@ -35,6 +35,7 @@ dependencies = [
 tractusmind-ingest = "app.ingestion.cli:main"
 tractusmind-benchmark = "app.evaluation.cli:main"
 tractusmind-answer-eval = "app.evaluation.answer_cli:main"
+tractusmind-quality-gate = "app.evaluation.quality_gate:main"
 tractusmind-scheduler = "app.workers.scheduler:main"
 
 [project.optional-dependencies]
