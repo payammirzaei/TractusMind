@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 
-import { SESSION_COOKIE_NAME } from "@/lib/server-session";
+import { SESSION_COOKIE_NAME, trustedBrowserMutation } from "@/lib/server-session";
 
 const API_URL = (process.env.TRACTUSMIND_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
 const ALLOWED_V1_ROOTS = new Set(["ask", "conversations", "feedback", "me", "ops"]);
@@ -25,12 +25,7 @@ function supportedPath(path: string[]) {
 function trustedMutation(request: Request) {
   const method = request.method.toUpperCase();
   if (method === "GET" || method === "HEAD") return true;
-
-  const requestUrl = new URL(request.url);
-  const origin = request.headers.get("origin");
-  const fetchSite = request.headers.get("sec-fetch-site");
-  if (fetchSite === "cross-site") return false;
-  return !origin || origin === requestUrl.origin;
+  return trustedBrowserMutation(request);
 }
 
 function responseHeaders(upstream: Response) {
