@@ -38,9 +38,8 @@ jobs:
           set -euo pipefail
           cp .env.example .env
           sed -i 's/^OPS_ADMIN_KEY=.*/OPS_ADMIN_KEY=integration-admin-key/' .env
-          # Keep the stack deterministic: no external OIDC, LLM or GitHub provider is required
-          # for this control-plane gate. Corpus/LLM behavior is enforced by the dedicated
-          # full-corpus and production-quality workflows.
+          # Release-candidate gate: no external provider is required for this control-plane smoke.
+          # Corpus/LLM behavior is enforced by the dedicated full-corpus and quality workflows.
           grep -q '^OPS_ADMIN_KEY=integration-admin-key$' .env
 
       - name: Build and start real storage, API, workers and Mission Control
