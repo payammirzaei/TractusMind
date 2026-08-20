@@ -1,10 +1,9 @@
 # Production evaluation gate
 
-TractusMind separates benchmark **measurement** from benchmark **enforcement**.
+TractusMind separates **measurement** from **enforcement**.
 
-Seed datasets are useful for trend reporting, but aggregate recall/MRR thresholds are not invented
-before a full-corpus baseline exists. The production gate therefore starts with hard product
-contracts that do not require arbitrary tuning.
+V20 adds a full-corpus contract before any retrieval or answer metric is considered valid. The gate
+therefore verifies the indexed source set and upstream freshness before evaluating the model path.
 
 ## Enforced contracts
 
@@ -16,86 +15,99 @@ unsafe evidence acceptance rate   = 0
 all reviewed retrieval regressions pass
 all reviewed debug regressions pass
 all reviewed answer regressions pass
+pinned evidence threshold does not drift
 ```
 
-A promoted production regression is treated as a hard contract because a human reviewer already
-approved its expected behavior.
+A reviewed production regression is a hard contract because a human reviewer explicitly approved
+its expected behavior.
 
-Seed retrieval/debug metrics are still recorded as artifacts so future baseline changes can be
-measured before aggregate thresholds are introduced.
+Aggregate recall/MRR/NDCG are measured and recorded, but are not given invented pass/fail numbers
+before repeated full-corpus measurements justify them.
 
-## Live workflow
+## Full-corpus prerequisite
 
-`.github/workflows/quality-gate.yml` runs the real production retrieval and answer paths against a
-configured Qdrant corpus and LLM provider.
+Before the production gate runs benchmarks it executes:
 
-Scheduled execution is opt-in:
+```bash
+tractusmind-corpus-validate --verify-upstream
+```
+
+For every enabled source this requires PostgreSQL source state, a matching successful ingestion run,
+Qdrant chunks for the same snapshot, no stale snapshot chunks, and equality with the current GitHub
+commit resolved from the configured ref.
+
+See [`full-corpus-validation.md`](full-corpus-validation.md) for the complete corpus contract.
+
+## Production quality workflow
+
+`.github/workflows/quality-gate.yml` runs weekly when enabled or manually through
+`workflow_dispatch`.
+
+Required GitHub environment: `quality`.
+
+### Secrets
 
 ```text
-Repository variable:
-QUALITY_GATE_ENABLED=true
+QUALITY_DATABASE_URL
+QUALITY_QDRANT_URL
+QUALITY_QDRANT_API_KEY        # optional when Qdrant has no auth
+QUALITY_GITHUB_TOKEN
+QUALITY_LLM_BASE_URL
+QUALITY_LLM_API_KEY
 ```
 
-Required GitHub Actions configuration:
+### Variables
 
 ```text
-Secret: QUALITY_QDRANT_URL
-Secret: QUALITY_QDRANT_API_KEY        # optional when Qdrant has no auth
-Secret: QUALITY_LLM_BASE_URL
-Secret: QUALITY_LLM_API_KEY
-Variable: QUALITY_LLM_MODEL
+QUALITY_LLM_MODEL
+QUALITY_QDRANT_COLLECTION     # optional; defaults to tractusmind_knowledge
+QUALITY_GATE_ENABLED
 ```
 
-The workflow can always be started manually with `workflow_dispatch`. Missing required live
-configuration fails explicitly instead of silently switching to mocks.
+Missing live configuration fails explicitly. The workflow never falls back to mocks.
 
-## Reports
+## V20 benchmark sets
 
-A run uploads JSON artifacts for:
+The enforced live path now uses:
 
 ```text
-retrieval seed benchmark
-debug seed benchmark
-threshold calibration
-grounded answer safety evaluation
-reviewed retrieval regressions, when present
-reviewed debug regressions, when present
-reviewed answer regressions, when present
-final quality-gate verdict
+benchmarks/full_corpus_v1.jsonl   # retrieval; all six enabled sources
+benchmarks/debug_v0.jsonl         # exact/debug retrieval cases
+benchmarks/answer_v1.jsonl        # all six sources + negative abstention cases
 ```
 
-Reports are retained as GitHub Actions artifacts so a failure can be inspected without rerunning
-the model pipeline.
+The V1 retrieval and answer datasets are tested against `config/sources.toml`: every enabled source
+must have benchmark coverage.
 
 ## Threshold calibration and pinning
 
-Calibration runs with:
+Full-corpus calibration runs with:
 
 ```bash
 tractusmind-answer-eval calibrate \
-  --dataset benchmarks/answer_v0.jsonl \
+  --dataset benchmarks/answer_v1.jsonl \
   --max-unsafe-rate 0
 ```
 
-The gate refuses production enforcement with `--require-pinned-threshold` until the measured
-threshold has been reviewed and committed to:
+The dedicated `.github/workflows/full-corpus-validation.yml` workflow measures the candidate
+threshold and evaluates answers at that measured value. It emits a `pin-candidate.toml` artifact but
+never commits or applies the value automatically.
+
+After reviewing the corpus manifest, source commits, model identities, retrieval results, answer
+metrics, and safety/regression verdict, commit the reviewed value to:
 
 ```toml
 [calibration]
 threshold_tolerance = 0.000001
-minimum_relevance_score = <measured value>
+minimum_relevance_score = <reviewed measured value>
 ```
 
-A later calibration that recommends a different threshold beyond the configured tolerance fails
-with `threshold-drift`. This prevents a new corpus/model/index from silently changing the
-production evidence cutoff.
-
-The threshold is intentionally not populated by code generation or guessed from seed data. It must
-come from a real corpus calibration run.
+The production quality gate runs with `--require-pinned-threshold`. If a future full-corpus
+calibration recommends a value outside the configured tolerance, it fails with `threshold-drift`.
 
 ## Reviewed regressions
 
-Approved quality-loop exports belong in:
+Human-approved production cases live in:
 
 ```text
 benchmarks/regressions/retrieval.jsonl
@@ -103,22 +115,39 @@ benchmarks/regressions/debug.jsonl
 benchmarks/regressions/answer.jsonl
 ```
 
-The workflow skips a regression kind when its file does not exist or is empty. Once a reviewed
-case is committed, every case in that file must pass.
+A regression kind is skipped only while its file is absent or empty. Once cases are committed, every
+reviewed case must pass.
+
+## Reports
+
+The production workflow retains 90-day artifacts for:
+
+```text
+corpus.json
+retrieval-full.json
+debug.json
+calibration.json
+answer-full.json
+reviewed regression reports when present
+gate.json
+```
+
+The separate full-corpus measurement workflow additionally records source-sync output,
+`validation-summary.json`, input SHA-256 values, source/upstream commits, and `pin-candidate.toml`.
 
 ## Local gate usage
 
-After producing reports:
+After reports are generated:
 
 ```bash
 tractusmind-quality-gate \
   --config config/quality_gate.toml \
   --calibration artifacts/quality/calibration.json \
-  --answer artifacts/quality/answer-seed.json \
+  --answer artifacts/quality/answer-full.json \
   --require-pinned-threshold
 ```
 
-Add regression report arguments when those datasets exist:
+Add reviewed regression reports when present:
 
 ```text
 --retrieval-regression <report.json>
@@ -126,10 +155,14 @@ Add regression report arguments when those datasets exist:
 --answer-regression <report.json>
 ```
 
-The command prints a JSON verdict and exits non-zero when any enforced contract fails.
+The command prints a JSON verdict and exits non-zero when an enforced contract fails.
 
-## What is not gated yet
+## Deliberate limits
 
-Aggregate seed-dataset recall, MRR, NDCG, false-abstention rate, and latency are measured but are
-not yet assigned arbitrary pass/fail numbers. After a full-corpus baseline and several measured
-runs exist, versioned lower/upper bounds can be added with evidence for why those numbers are safe.
+- A threshold is never guessed or auto-committed.
+- Raw feedback never becomes a regression benchmark automatically.
+- A stale or incomplete corpus cannot produce a valid full-corpus quality run.
+- Aggregate retrieval metric thresholds remain report-only until repeated measurements justify a
+  versioned baseline.
+- LLM evaluation can vary by provider/model behavior, so every full-corpus evidence packet records
+  the exact model identity and Git/source inputs used.
