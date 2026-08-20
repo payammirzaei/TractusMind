@@ -1,0 +1,101 @@
+name: Full Stack Integration
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "frontend/**"
+      - "scripts/full_stack_smoke.py"
+      - "docker-compose.yml"
+      - "docker-compose.ui.yml"
+      - "Dockerfile"
+      - ".github/workflows/integration.yml"
+  pull_request:
+    paths:
+      - "app/**"
+      - "frontend/**"
+      - "scripts/full_stack_smoke.py"
+      - "docker-compose.yml"
+      - "docker-compose.ui.yml"
+      - "Dockerfile"
+      - ".github/workflows/integration.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  full-stack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Prepare integration environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .env.example .env
+          sed -i 's/^OPS_ADMIN_KEY=.*/OPS_ADMIN_KEY=integration-admin-key/' .env
+          # Keep the stack deterministic: no external OIDC, LLM or GitHub provider is required
+          # for this control-plane gate. Corpus/LLM behavior is enforced by the dedicated
+          # full-corpus and production-quality workflows.
+          grep -q '^OPS_ADMIN_KEY=integration-admin-key$' .env
+
+      - name: Build and start real storage, API, workers and Mission Control
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose \
+            -f docker-compose.yml \
+            -f docker-compose.ui.yml \
+            up -d --build \
+            postgres redis qdrant migrate api worker scheduler frontend
+
+      - name: Run full-stack control-plane smoke
+        env:
+          SMOKE_OPS_ADMIN_KEY: integration-admin-key
+          SMOKE_API_URL: http://127.0.0.1:8000
+          SMOKE_UI_URL: http://127.0.0.1:3100
+          SMOKE_TIMEOUT_SECONDS: "240"
+        run: python scripts/full_stack_smoke.py
+
+      - name: Assert long-running services survived the smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          for service in api worker scheduler postgres redis qdrant frontend; do
+            cid=$(docker compose -f docker-compose.yml -f docker-compose.ui.yml ps -q "$service")
+            test -n "$cid" || { echo "$service has no container"; exit 1; }
+            state=$(docker inspect -f '{{.State.Status}}' "$cid")
+            test "$state" = running || { echo "$service is $state"; exit 1; }
+          done
+
+      - name: Capture integration diagnostics
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p artifacts/integration
+          docker compose -f docker-compose.yml -f docker-compose.ui.yml ps -a \
+            > artifacts/integration/compose-ps.txt 2>&1 || true
+          docker compose -f docker-compose.yml -f docker-compose.ui.yml logs --no-color \
+            > artifacts/integration/compose.log 2>&1 || true
+
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tractusmind-full-stack-${{ github.sha }}
+          path: artifacts/integration
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Tear down integration stack
+        if: always()
+        shell: bash
+        run: >-
+          docker compose
+          -f docker-compose.yml
+          -f docker-compose.ui.yml
+          down -v --remove-orphans
