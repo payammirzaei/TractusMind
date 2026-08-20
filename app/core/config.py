@@ -54,6 +54,8 @@ class Settings(BaseSettings):
 
     metrics_enabled: bool = True
     metrics_admin_key: str | None = None
+    worker_metrics_port: int = Field(default=0, ge=0, le=65_535)
+    scheduler_metrics_port: int = Field(default=0, ge=0, le=65_535)
     otel_traces_endpoint: str | None = None
     otel_service_name: str = "tractusmind-api"
     otel_sample_ratio: float = Field(default=1.0, ge=0.0, le=1.0)
