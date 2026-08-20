@@ -7,6 +7,7 @@ from app.conversations.store import FeedbackRecord, InteractionIdentity
 from app.generation.llm import LLMGenerationError
 from app.generation.models import GroundedAnswer
 from app.observability.metrics import observe_stage
+from app.observability.trace_context import record_trace_metadata
 from app.routing.models import QueryIntent, QueryRoute
 
 _CONVERSATION_ID = "11111111-1111-4111-8111-111111111111"
@@ -31,6 +32,11 @@ class FakeAnswerService:
 
 class FailingAnswerService:
     async def answer(self, _question: str) -> GroundedAnswer:
+        record_trace_metadata("intent", "sdk")
+        record_trace_metadata("model", "test-model")
+        record_trace_metadata("route", {"intent": "sdk"})
+        record_trace_metadata("evidence_count", 2)
+        record_trace_metadata("citations", [{"citation_id": "S1"}])
         with observe_stage("generation", "sdk"):
             raise LLMGenerationError("provider failed")
 
@@ -110,6 +116,10 @@ def test_generation_failure_is_persisted_before_http_error() -> None:
     assert response.status_code == 502
     assert store.failure_kwargs is not None
     assert store.failure_kwargs["error_type"] == "LLMGenerationError"
+    assert store.failure_kwargs["intent"] == "sdk"
+    assert store.failure_kwargs["model"] == "test-model"
+    assert store.failure_kwargs["evidence_count"] == 2
+    assert store.failure_kwargs["route_json"] == {"intent": "sdk"}
     durations = store.failure_kwargs["stage_durations"]
     assert isinstance(durations, dict)
     assert "generation" in durations
