@@ -20,6 +20,7 @@ inspectability, and measurable evaluation come before UI work.
 - Claim-level answer verification
 - PostgreSQL source/file state + ingestion-run history
 - Redis + Dramatiq background ingestion
+- Protected ingestion operations API
 - Tree-sitter structure-aware code chunking
 - Docker / Docker Compose
 - GitHub Actions
@@ -156,10 +157,53 @@ tractusmind-scheduler --once
 tractusmind-scheduler
 ```
 
-The worker actor retries runtime failures through the same idempotent incremental sync path. No
-unauthenticated public HTTP endpoint is exposed for ingestion mutations.
+The worker actor retries runtime failures through the same idempotent incremental sync path.
 
 See [`docs/background-ingestion.md`](docs/background-ingestion.md).
+
+## Ingestion operations API
+
+Source maintenance is inspectable and triggerable through a protected internal API. Configure a
+strong admin key:
+
+```bash
+OPS_ADMIN_KEY=replace-with-a-long-random-secret
+```
+
+Send it as:
+
+```http
+X-TractusMind-Admin-Key: replace-with-a-long-random-secret
+```
+
+If the key is not configured, the entire `/v1/ops/*` surface returns `503`; it never silently
+falls back to public access.
+
+Read operations:
+
+```text
+GET /v1/ops/summary
+GET /v1/ops/sources
+GET /v1/ops/sources/{source_id}
+GET /v1/ops/runs
+GET /v1/ops/runs/{run_id}
+```
+
+The source view merges the static registry with PostgreSQL and Redis state. It exposes current
+snapshot provenance, indexed-file count, lock state, last successful run, and the latest run even
+when that latest run failed or is still running.
+
+Manual triggers enqueue work instead of running ingestion inside the HTTP request:
+
+```text
+POST /v1/ops/sources/{source_id}/sync
+POST /v1/ops/sync
+```
+
+Successful enqueue operations return `202 Accepted` and the Dramatiq message ID. Failed ingestion
+runs keep their persisted delta counters and error details for operator inspection.
+
+See [`docs/operations.md`](docs/operations.md).
 
 ## Smart chunking
 
@@ -339,7 +383,7 @@ See [`docs/architecture.md`](docs/architecture.md).
 
 ## Current milestone
 
-**V9 — Automated Incremental Source Synchronization**
+**V10 — Ingestion Operations + Observability API**
 
 - [x] source-grounded FastAPI query service
 - [x] allowlisted Tractus-X source registry
@@ -362,10 +406,14 @@ See [`docs/architecture.md`](docs/architecture.md).
 - [x] configurable scheduled sync of all enabled sources
 - [x] CLI queue controls
 - [x] Docker worker + scheduler topology
+- [x] admin-key-protected operations API
+- [x] source snapshot/file-count/lock observability
+- [x] latest run and failed-run visibility
+- [x] authenticated HTTP ingestion enqueue controls
 - [ ] run full-corpus debug benchmark and tune fusion weights
 - [ ] run full-corpus abstention calibration and persist the measured threshold
-- [ ] expose authenticated ingestion status/operations endpoints
-- [ ] add production observability for queues, runs, latency, and model cache
+- [ ] add Prometheus/OpenTelemetry latency and queue metrics
+- [ ] add model-cache/runtime diagnostics
 
 ## License
 
