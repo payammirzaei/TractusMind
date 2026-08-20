@@ -1,7 +1,7 @@
 # Observability
 
 TractusMind exposes low-cardinality Prometheus metrics and optional OpenTelemetry traces for the
-API, RAG pipeline, local models, ingestion worker, and source scheduler.
+API, RAG pipeline, local models, external providers, ingestion worker, and source scheduler.
 
 ## Local topology
 
@@ -10,8 +10,8 @@ scrapes four targets:
 
 | Target | Endpoint | Purpose |
 | --- | --- | --- |
-| API | `api:8000/metrics` | HTTP + answer pipeline + API process/model metrics |
-| Worker domain | `worker:9101/metrics` | TractusMind ingestion + worker/model metrics |
+| API | `api:8000/metrics` | HTTP + answer pipeline + API process/model/provider metrics |
+| Worker domain | `worker:9101/metrics` | TractusMind ingestion + worker/model/provider metrics |
 | Dramatiq | `worker:9191/` | Native queue, retry, error, in-progress, and job-duration metrics |
 | Scheduler | `scheduler:9102/metrics` | Scheduled enqueue metrics |
 
@@ -47,6 +47,10 @@ Important families include:
 - `tractusmind_model_load_duration_seconds`
 - `tractusmind_model_loaded`
 - `tractusmind_model_operation_duration_seconds`
+- `tractusmind_provider_requests_total`
+- `tractusmind_provider_retries_total`
+- `tractusmind_provider_retry_delay_seconds`
+- `tractusmind_provider_circuit_open_total`
 - `tractusmind_ingestion_runs_total`
 - `tractusmind_ingestion_duration_seconds`
 - `tractusmind_ingestion_files_total`
@@ -55,13 +59,18 @@ Important families include:
 - `tractusmind_worker_jobs_total`
 - `tractusmind_queue_enqueued_total`
 
+Provider metrics use only bounded labels such as `provider`, `operation`, `outcome`, `reason`, and
+`event`. They expose retry pressure and circuit behavior without recording prompts, URLs, response
+bodies, repository paths, or provider error text.
+
 Dramatiq additionally exports its native `dramatiq_*` metrics, including processed messages,
 errors, retries, in-progress messages, and message duration.
 
 ## Cardinality policy
 
 Metric labels are deliberately bounded. Allowed labels include route templates, pipeline stages,
-query intent, fixed model roles, source IDs from the allowlisted registry, status, and change type.
+query intent, fixed model/provider roles, source IDs from the allowlisted registry, status, and
+change type.
 
 Never put these values in metric labels:
 
@@ -139,6 +148,22 @@ sum(rate(tractusmind_answers_total{outcome="grounded"}[5m]))
 sum(rate(tractusmind_answers_total[5m]))
 ```
 
+Provider retry rate:
+
+```promql
+sum by (provider, reason) (
+  rate(tractusmind_provider_retries_total[5m])
+)
+```
+
+Provider circuit rejections:
+
+```promql
+sum by (provider) (
+  rate(tractusmind_provider_circuit_open_total{event="rejected"}[5m])
+)
+```
+
 Ingestion failures by source:
 
 ```promql
@@ -165,3 +190,6 @@ histogram_quantile(
   )
 )
 ```
+
+Provider retry/circuit behavior is documented in
+[`provider-resilience.md`](provider-resilience.md).
