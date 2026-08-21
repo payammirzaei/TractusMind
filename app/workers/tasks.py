@@ -9,6 +9,11 @@ from app.workers.sync import run_source_sync
 
 logger = structlog.get_logger()
 
+# Dramatiq's default TimeLimit middleware stops actors after 10 minutes. A first
+# full corpus sync can legitimately take tens of minutes on CPU-only production
+# workers, so give ingestion enough headroom while keeping a hard upper bound.
+SOURCE_SYNC_TIME_LIMIT_MS = 4 * 60 * 60 * 1000
+
 
 @dramatiq.actor(max_retries=3)
 def healthcheck_task() -> str:
@@ -16,7 +21,7 @@ def healthcheck_task() -> str:
     return "ok"
 
 
-@dramatiq.actor(max_retries=3)
+@dramatiq.actor(max_retries=3, time_limit=SOURCE_SYNC_TIME_LIMIT_MS)
 def sync_source_task(source_id: str) -> dict[str, object]:
     logger.info("source_sync_started", source_id=source_id)
     WORKER_JOBS_IN_PROGRESS.inc()
