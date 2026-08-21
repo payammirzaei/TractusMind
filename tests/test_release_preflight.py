@@ -4,7 +4,6 @@ import pytest
 
 from scripts import release_preflight
 
-
 BASE_CONFIG = """\
 version = 1
 
