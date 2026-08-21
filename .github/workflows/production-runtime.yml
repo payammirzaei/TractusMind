@@ -185,7 +185,7 @@ jobs:
           set +e
           $COMPOSE_CMD ps -a > artifacts/production-runtime/compose-ps.txt 2>&1
           $COMPOSE_CMD logs --no-color --tail=250 \
-            api worker scheduler frontend caddy postgres redis qdrant \
+            migrate api worker scheduler frontend caddy postgres redis qdrant \
             > artifacts/production-runtime/compose.log 2>&1
 
       - name: Upload production diagnostics on failure
