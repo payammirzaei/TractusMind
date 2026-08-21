@@ -72,6 +72,51 @@ def test_python_chunking_preserves_symbol_parentage_and_decorators() -> None:
     assert method_chunk.start_line == 3
 
 
+def test_python_chunking_materializes_complex_declarations_without_native_node_reuse() -> None:
+    document = _document(
+        path="examples/industry/notification/send_notification.py",
+        content=(
+            "def main():\n"
+            "    policies = [{\n"
+            "        'permission': {'action': 'use'},\n"
+            "        'prohibition': [],\n"
+            "        'obligation': [],\n"
+            "    }]\n"
+            "    notification = (\n"
+            "        Builder()\n"
+            "        .sender('BPNL0001')\n"
+            "        .receiver('BPNL0002')\n"
+            "        .build()\n"
+            "    )\n"
+            "    try:\n"
+            "        return send(notification, policies=policies)\n"
+            "    except ValueError as exc:\n"
+            "        raise RuntimeError('send failed') from exc\n\n"
+            "def send_with_manual_endpoint():\n"
+            "    for index in range(3):\n"
+            "        send(Builder().information(f'Notification {index + 1}').build())\n\n"
+            "def discover_and_inspect():\n"
+            "    assets = discover()\n"
+            "    for asset in assets:\n"
+            "        print(asset.get('@id', 'unknown'))\n"
+        ),
+        content_type="code",
+        language="python",
+    )
+    chunker = SmartChunker(code_max_chars=2_200)
+
+    first = chunker.chunk(document)
+    second = chunker.chunk(document)
+
+    assert {chunk.symbol for chunk in first} == {
+        "main",
+        "send_with_manual_endpoint",
+        "discover_and_inspect",
+    }
+    assert all(chunk.parent_symbol is None for chunk in first)
+    assert [chunk.chunk_id for chunk in first] == [chunk.chunk_id for chunk in second]
+
+
 def test_yaml_chunking_uses_top_level_keys() -> None:
     document = _document(
         path="config/application.yml",
