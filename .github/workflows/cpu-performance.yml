@@ -10,7 +10,9 @@ on:
       - "app/reranking/**"
       - "app/retrieval/**"
       - "app/evaluation/performance_cli.py"
+      - "app/evaluation/performance_gate.py"
       - "benchmarks/full_corpus_v1.jsonl"
+      - "config/performance_gate.toml"
       - "tests/test_performance_cli.py"
       - "pyproject.toml"
 
@@ -37,7 +39,7 @@ jobs:
       - name: Install
         run: python -m pip install -e ".[dev]"
 
-      - name: Verify benchmark helpers
+      - name: Verify benchmark and budget helpers
         run: pytest -q tests/test_performance_cli.py
 
       - name: Record CPU environment
@@ -52,7 +54,7 @@ jobs:
           print(f"initial affinity={sorted(os.sched_getaffinity(0))}")
           PY
 
-      - name: Measure production model path on at most two CPUs
+      - name: Measure and enforce production model budget on at most two CPUs
         shell: bash
         run: |
           set -euo pipefail
@@ -71,11 +73,19 @@ jobs:
             --candidate-count 20 \
             --candidate-chars 1200 \
             --rerank-limit 6 \
+            --budget config/performance_gate.toml \
             --output artifacts/cpu-performance.json
 
-      - name: Publish measurement summary
+      - name: Publish measurement and budget summary
+        if: always()
         shell: bash
         run: |
+          if [ ! -f artifacts/cpu-performance.json ]; then
+            echo "## CPU-only retrieval measurement" >> "$GITHUB_STEP_SUMMARY"
+            echo >> "$GITHUB_STEP_SUMMARY"
+            echo "No performance report was produced." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
           import json
           from pathlib import Path
@@ -84,28 +94,46 @@ jobs:
           env = report["environment"]
           steady = report["steady_state"]
           cold = report["cold_start"]
+          gate = report.get("budget_gate")
 
           print("## CPU-only retrieval measurement")
           print()
+          if gate:
+              status = str(gate["status"]).upper()
+              print(f"Release budget gate: **{status}**")
+              print()
           print(
               f"Affinity: `{env['cpu_affinity']}` · max RSS: "
               f"`{env['max_rss_mb']:.1f} MiB`"
           )
           print()
-          print("| Stage | p50 | p95 | max |")
-          print("| --- | ---: | ---: | ---: |")
-          for label, key in [
-              ("Dense query", "dense_query"),
-              ("Sparse query", "sparse_query"),
-              ("Rerank 20 → 6", "rerank"),
-              ("Combined model compute", "combined_model_compute"),
-          ]:
+          print("| Stage | p50 | p95 | max | budget |")
+          print("| --- | ---: | ---: | ---: | ---: |")
+          rows = [
+              ("Dense query", "dense_query", "dense_query_p95_ms"),
+              ("Sparse query", "sparse_query", "sparse_query_p95_ms"),
+              ("Rerank 20 → 6", "rerank", "rerank_p95_ms"),
+              (
+                  "Combined model compute",
+                  "combined_model_compute",
+                  "combined_model_compute_p95_ms",
+              ),
+          ]
+          for label, key, budget_key in rows:
               item = steady[key]
+              budget = "—"
+              if gate:
+                  limit = gate["budget_checks"][budget_key]["limit"]
+                  budget = f"{limit:.1f} ms"
               print(
                   f"| {label} | {item['p50_ms']:.1f} ms | "
-                  f"{item['p95_ms']:.1f} ms | {item['max_ms']:.1f} ms |"
+                  f"{item['p95_ms']:.1f} ms | {item['max_ms']:.1f} ms | {budget} |"
               )
           print()
+          if gate:
+              rss_limit = gate["budget_checks"]["max_rss_mb"]["limit"]
+              print(f"Memory budget: `{rss_limit:.0f} MiB` max RSS.")
+              print()
           print(
               "Cold model initialization: "
               f"`{cold['combined_model_seconds']:.2f} s` "
@@ -114,7 +142,7 @@ jobs:
           print()
           print(
               "This measurement intentionally excludes Qdrant network/search and external "
-              "LLM latency. Budgets are pinned only after measurement evidence exists."
+              "LLM latency; those are validated separately in the live deployment path."
           )
           PY
 
