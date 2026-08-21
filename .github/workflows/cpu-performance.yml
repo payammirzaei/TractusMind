@@ -57,11 +57,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          if [ "$(nproc)" -ge 2 ]; then
-            affinity="0,1"
-          else
-            affinity="0"
-          fi
+          affinity="$(python - <<'PY'
+          import os
+          cpus = sorted(os.sched_getaffinity(0))[:2]
+          print(",".join(str(cpu) for cpu in cpus))
+          PY
+          )"
+          test -n "$affinity"
           echo "Constraining benchmark process to CPU affinity ${affinity}"
           taskset -c "$affinity" tractusmind-perf \
             --dataset benchmarks/full_corpus_v1.jsonl \
