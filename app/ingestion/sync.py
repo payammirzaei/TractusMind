@@ -52,6 +52,13 @@ class IncrementalSourceSync:
         plan = build_incremental_plan(manifest, previous_files)
         run_id = await self.state.start_run(manifest)
 
+        await self.state.update_run_progress(
+            run_id,
+            added_count=len(plan.added),
+            modified_count=len(plan.modified),
+            deleted_count=len(plan.deleted_paths),
+            unchanged_count=len(plan.unchanged),
+        )
         logger.info(
             "ingestion_plan_ready",
             run_id=run_id,
@@ -71,6 +78,7 @@ class IncrementalSourceSync:
                 file_count=len(plan.changed_files),
             )
             documents = await self.pipeline.fetch_files(manifest, plan.changed_files)
+            await self.state.update_run_progress(run_id, fetched_count=len(documents))
             logger.info(
                 "ingestion_fetch_succeeded",
                 run_id=run_id,
@@ -79,6 +87,7 @@ class IncrementalSourceSync:
             )
 
             chunks = self.chunker.chunk_many(documents)
+            await self.state.update_run_progress(run_id, chunk_count=len(chunks))
             logger.info(
                 "ingestion_chunking_succeeded",
                 run_id=run_id,
@@ -92,7 +101,21 @@ class IncrementalSourceSync:
                 source_id=manifest.source_id,
                 chunk_count=len(chunks),
             )
-            indexed = await self.retrieval.index(chunks) if chunks else 0
+
+            async def persist_index_progress(indexed_count: int) -> None:
+                await self.state.update_run_progress(
+                    run_id,
+                    indexed_count=indexed_count,
+                )
+
+            indexed = (
+                await self.retrieval.index(
+                    chunks,
+                    progress_callback=persist_index_progress,
+                )
+                if chunks
+                else 0
+            )
             logger.info(
                 "ingestion_index_succeeded",
                 run_id=run_id,
