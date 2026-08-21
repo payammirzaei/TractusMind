@@ -1,8 +1,8 @@
 # TractusMind Project History
 
-This directory records how TractusMind evolved from an initial source-grounded RAG backend into a production-oriented engineering copilot with a full Mission Control UI, hardened deployment topology, quality gates, and end-to-end CI verification.
+This directory records how TractusMind evolved from a source-grounded RAG backend into a production-oriented engineering copilot with Mission Control, hardened runtime gates, measurable retrieval quality, and release engineering.
 
-It is intentionally different from the feature-specific documents under `docs/`. The existing documents explain **how the current system works**. This folder explains **what we built, why we built it, what decisions changed along the way, what was verified, and what still remains before v1.0.0**.
+The feature documents under `docs/` explain **how the current system works**. This history explains **what was built, why architectural decisions changed, which incidents exposed real weaknesses, what was verified, and what remains before `v1.0.0`**.
 
 ## Documents
 
@@ -19,37 +19,43 @@ It is intentionally different from the feature-specific documents under `docs/`.
 
 ## Current high-level state
 
-As of 2026-08-21:
+Snapshot: **2026-08-21, after PR #9 hardening merge**.
 
-- Core backend architecture: complete.
-- Mission Control application: functionally complete for v1.
-- CI, frontend build, security scanning and real full-stack integration: verified green.
-- Tractus-X SDK ingestion SIGSEGV: root-caused to Python tree-sitter parsing and fixed by moving Python code chunking to the standard-library AST path; the fix was merged through PR #11.
-- Full-corpus calibration: active validation work remains.
-- Hardened production-runtime gate: active validation work remains through PR #12.
-- Live LLM answer certification and final public production smoke still require real provider/deployment inputs.
-- Final `v1.0.0` release has not yet been tagged.
+- Core backend/RAG implementation: **feature-complete for v1**.
+- Mission Control: **feature-complete and premium-polished for v1**.
+- CI, frontend runtime, Security/Trivy, Full Stack Integration: **verified green**.
+- Hardened Production Runtime HTTPS gate: **merged and verified green** through PR #12.
+- Release preflight + backup/restore hardening: **merged** through PR #13.
+- Premium Mission Control visual polish: **merged** through PR #14.
+- CPU-only retrieval-model performance gate: **merged and measured** through PR #15; two-CPU combined local-model p95 was ~0.99s with ~893 MiB max RSS on the recorded run.
+- Railway production topology/runbook: **documented**.
+- Real-corpus ingestion hardening: **merged**; Python native parsing crash, Java crash risk, legacy semantic-model decoding and Turtle line provenance all have durable fixes/regressions.
+- Full-corpus calibration workflow: **manual-only** so normal changes do not spend hours rebuilding the corpus.
+- Final six-source calibration + measured threshold pin: **still required release evidence**.
+- Real LLM grounded-answer certification: **still requires provider inputs**.
+- Live Railway HTTPS smoke: **still requires an actual deployment**.
+- `main` branch protection and stale branch deletion: **still repository-admin cleanup**.
+- Final `v1.0.0` release: **not yet tagged**.
 
-## Canonical technical documentation
-
-For the exact current implementation, use these documents together with this history:
+## Canonical current documentation
 
 - [`../architecture.md`](../architecture.md)
 - [`../mission-control.md`](../mission-control.md)
 - [`../full-corpus-validation.md`](../full-corpus-validation.md)
 - [`../quality-gate.md`](../quality-gate.md)
+- [`../cpu-performance.md`](../cpu-performance.md)
 - [`../production-deployment.md`](../production-deployment.md)
-- [`../observability.md`](../observability.md)
-- [`../operations.md`](../operations.md)
+- [`../railway-deployment.md`](../railway-deployment.md)
+- [`../release-checklist.md`](../release-checklist.md)
 
 ## Guiding engineering principles
 
-The project consistently converged on a small set of rules:
-
 - **Source grounding before fluent generation.** Conversation history may provide context, but it must never become evidence.
 - **Fail closed on provenance.** Explicit repository/ref/commit constraints are not silently relaxed.
-- **No fake operational data.** Mission Control status, quality data and provenance must come from real backend state.
-- **Browser credentials stay server-side.** Bearer/API credentials are converted into HttpOnly sessions through the BFF boundary rather than persisted in browser storage.
-- **Security findings are fixed at the root where practical.** Vulnerable or unnecessary runtime tooling is removed instead of hidden behind ignores.
-- **Quality thresholds are measured, not invented.** Retrieval/abstention thresholds are expected to come from full-corpus calibration evidence.
-- **A feature is not considered done merely because it builds.** The target is reproducible end-to-end behavior under Docker, CI and production-like conditions.
+- **No fake operational data.** Mission Control status, quality data and provenance come from real backend state.
+- **Browser credentials stay server-side.** Bearer/API credentials are converted into HttpOnly sessions through the BFF boundary.
+- **Security findings are fixed at the root where practical.** Unnecessary/vulnerable runtime tooling is removed rather than hidden behind ignores.
+- **Quality thresholds are measured, not invented.** The production evidence threshold comes from full-corpus calibration evidence and human review.
+- **Performance budgets are measured, not guessed.** CPU model budgets were pinned only after a real constrained benchmark.
+- **A feature is not done merely because it builds.** The target is reproducible behavior under CI, Docker and production-like runtime gates.
+- **Platform adaptation must preserve security boundaries.** Railway uses its own HTTPS/private-network semantics rather than copying the self-hosted Caddy/Compose topology blindly.
