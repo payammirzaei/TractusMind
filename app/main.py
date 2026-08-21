@@ -17,6 +17,7 @@ from app.api.routes.me import router as me_router
 from app.api.routes.metrics import router as metrics_router
 from app.api.routes.ops import router as ops_router
 from app.api.routes.quality_ops import router as quality_ops_router
+from app.api.routes.snapshot_adopt import router as snapshot_adopt_router
 from app.api.routes.user_ops import router as user_ops_router
 from app.auth import AuthStore
 from app.auth.oidc import OIDCAuthenticator
@@ -94,6 +95,7 @@ app.include_router(conversations_router)
 app.include_router(feedback_router)
 app.include_router(me_router)
 app.include_router(ops_router)
+app.include_router(snapshot_adopt_router)
 app.include_router(interaction_ops_router)
 app.include_router(quality_ops_router)
 app.include_router(user_ops_router)
