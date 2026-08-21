@@ -150,3 +150,42 @@ jobs:
           tractusmind-db upgrade head
           tractusmind-db check
           tractusmind-db drift
+
+      - name: PostgreSQL backup and restore smoke test
+        shell: bash
+        env:
+          POSTGRES_CONTAINER_ID: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+
+          docker exec "$POSTGRES_CONTAINER_ID" \
+            psql -v ON_ERROR_STOP=1 -U tractusmind -d tractusmind -c \
+            "INSERT INTO source_state (source_id, repository, component, version_ref, snapshot_commit_sha) VALUES ('backup-smoke', 'eclipse-tractusx/backup-smoke', 'backup-smoke', 'main', repeat('a', 40)) ON CONFLICT (source_id) DO UPDATE SET repository = EXCLUDED.repository;"
+
+          docker exec "$POSTGRES_CONTAINER_ID" \
+            pg_dump -U tractusmind -d tractusmind \
+            --format=custom --no-owner --no-privileges \
+            --file=/tmp/tractusmind.dump
+
+          backup_size="$(docker exec "$POSTGRES_CONTAINER_ID" stat -c %s /tmp/tractusmind.dump)"
+          test "$backup_size" -gt 1024
+
+          docker exec "$POSTGRES_CONTAINER_ID" \
+            createdb -U tractusmind -O tractusmind tractusmind_restore
+          docker exec "$POSTGRES_CONTAINER_ID" \
+            pg_restore -U tractusmind -d tractusmind_restore \
+            --no-owner --no-privileges /tmp/tractusmind.dump
+
+          table_count="$(docker exec "$POSTGRES_CONTAINER_ID" psql -U tractusmind -d tractusmind_restore -Atc \
+            "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE';")"
+          test "$table_count" -ge 5
+
+          canary="$(docker exec "$POSTGRES_CONTAINER_ID" psql -U tractusmind -d tractusmind_restore -Atc \
+            "SELECT repository FROM source_state WHERE source_id = 'backup-smoke';")"
+          test "$canary" = "eclipse-tractusx/backup-smoke"
+
+          migration_rows="$(docker exec "$POSTGRES_CONTAINER_ID" psql -U tractusmind -d tractusmind_restore -Atc \
+            "SELECT count(*) FROM alembic_version;")"
+          test "$migration_rows" -ge 1
+
+          echo "PostgreSQL backup/restore smoke: PASS ($table_count public tables)"
