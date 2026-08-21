@@ -97,10 +97,20 @@ export function AdminPasswordManager() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="tm-control fixed bottom-5 right-5 z-[80] flex items-center gap-2 rounded-xl border border-cyan-300/15 px-4 py-3 text-xs font-semibold text-cyan-100 shadow-2xl"
+        aria-label="Manage human accounts"
+        className="tm-control fixed right-[132px] top-[82px] z-[80] hidden items-center gap-2 rounded-xl border border-cyan-300/15 bg-slate-950/75 px-3 py-2 text-[10px] font-semibold uppercase tracking-[.12em] text-cyan-100 shadow-xl backdrop-blur-md md:flex"
       >
-        <KeyRound className="size-4 text-cyan-300"/>
-        Password accounts
+        <UserPlus className="size-3.5 text-cyan-300"/>
+        Human accounts
+      </button>
+
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label="Manage human accounts"
+        className="tm-control fixed bottom-[76px] right-3 z-[80] flex size-10 items-center justify-center rounded-xl border border-cyan-300/15 bg-slate-950/80 text-cyan-100 shadow-xl backdrop-blur-md md:hidden"
+      >
+        <UserPlus className="size-4 text-cyan-300"/>
       </button>
 
       {open && (
@@ -110,7 +120,7 @@ export function AdminPasswordManager() {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="tm-label">local identity control</div>
-                  <h2 className="mt-1 text-xl font-semibold">Password accounts</h2>
+                  <h2 className="mt-1 text-xl font-semibold">Human accounts</h2>
                   <p className="mt-2 text-xs leading-5 text-slate-600">Create human Mission Control accounts with username/password login, or permanently remove identities.</p>
                 </div>
                 <Button variant="ghost" size="icon" onClick={() => setOpen(false)}><X className="size-4"/></Button>
@@ -126,12 +136,12 @@ export function AdminPasswordManager() {
                 </div>
                 <label className="mt-3 block"><span className="tm-label mb-2 block">password</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" className="tm-field w-full rounded-xl px-3 py-2.5 text-sm outline-none" placeholder="Minimum 12 characters"/></label>
                 <div className="mt-3"><span className="tm-label mb-2 block">role</span><div className="grid grid-cols-3 gap-2">{(["user", "operator", "admin"] as UserRole[]).map((item) => <button key={item} type="button" onClick={() => setRole(item)} className={cn("tm-control rounded-lg px-2 py-2 text-[10px] uppercase tracking-wider", role === item ? "text-cyan-200" : "text-slate-500")}>{item}</button>)}</div></div>
-                <Button variant="primary" className="mt-4 w-full" onClick={() => void createPasswordAccount()} disabled={busy === "create" || !displayName.trim() || !username.trim() || password.length < 12}><Plus className="size-4"/>{busy === "create" ? "Creating…" : "Create password account"}</Button>
+                <Button variant="primary" className="mt-4 w-full" onClick={() => void createPasswordAccount()} disabled={busy === "create" || !displayName.trim() || !username.trim() || password.length < 12}><Plus className="size-4"/>{busy === "create" ? "Creating…" : "Create human account"}</Button>
                 <div className="mt-2 text-[10px] text-slate-700">Password is hashed with scrypt by the backend and is never stored or returned in plaintext.</div>
               </div>
 
               <div className="mt-5 flex items-center justify-between">
-                <div><div className="tm-label">local accounts</div><div className="mt-1 text-xs text-slate-600">{localAccounts.length} password identities · {users.length} total identities</div></div>
+                <div><div className="tm-label">human accounts</div><div className="mt-1 text-xs text-slate-600">{localAccounts.length} password identities · {users.length} total identities</div></div>
                 <Button size="sm" onClick={() => void load()} disabled={busy !== null}><RefreshCw className="size-3.5"/>Refresh</Button>
               </div>
 
