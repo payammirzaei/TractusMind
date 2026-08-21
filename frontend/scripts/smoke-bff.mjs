@@ -1,5 +1,6 @@
 const baseUrl = (process.env.SMOKE_BASE_URL ?? "http://127.0.0.1:3100").replace(/\/$/, "");
-const token = "tm_test_admin";
+const username = "ci-admin";
+const password = "ci-password";
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -24,7 +25,7 @@ const crossSite = await fetch(`${baseUrl}/api/session`, {
     "origin": "https://evil.example",
     "sec-fetch-site": "cross-site",
   },
-  body: JSON.stringify({ token }),
+  body: JSON.stringify({ username, password }),
 });
 assert(crossSite.status === 403, `cross-site session mutation returned ${crossSite.status}`);
 process.stdout.write("ok cross-site session mutation rejected\n");
@@ -40,11 +41,13 @@ process.stdout.write("ok rejected backend session expired\n");
 const login = await fetch(`${baseUrl}/api/session`, {
   method: "POST",
   headers: { "content-type": "application/json" },
-  body: JSON.stringify({ token }),
+  body: JSON.stringify({ username, password }),
 });
 const loginPayload = await body(login);
 assert(login.status === 200, `session login returned ${login.status}: ${JSON.stringify(loginPayload)}`);
 assert(loginPayload.role === "admin", "session identity role was not forwarded");
+assert(loginPayload.auth_type === "password", "local password auth type was not forwarded");
+assert(loginPayload.token === undefined, "backend session token leaked to browser response");
 
 const setCookie = login.headers.get("set-cookie") ?? "";
 assert(setCookie.includes("__Host-tm_session="), "production session cookie name is not __Host-prefixed");
@@ -53,7 +56,7 @@ assert(/Secure/i.test(setCookie), "session cookie is missing Secure");
 assert(/SameSite=Lax/i.test(setCookie), "session cookie is missing SameSite=Lax");
 assert(/Path=\//i.test(setCookie), "session cookie is missing Path=/");
 const cookie = setCookie.split(";")[0];
-process.stdout.write("ok secure HttpOnly session established\n");
+process.stdout.write("ok password exchange established secure HttpOnly session\n");
 
 const me = await fetch(`${baseUrl}/api/session`, { headers: { cookie }, cache: "no-store" });
 const mePayload = await body(me);

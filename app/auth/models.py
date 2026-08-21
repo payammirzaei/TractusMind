@@ -11,6 +11,7 @@ class UserAccount(Base):
     __tablename__ = "app_user"
     __table_args__ = (
         Index("ux_app_user_oidc_identity", "oidc_issuer", "oidc_subject", unique=True),
+        Index("ux_app_user_username", "username", unique=True),
     )
 
     user_id: Mapped[str] = mapped_column(
@@ -21,6 +22,9 @@ class UserAccount(Base):
     display_name: Mapped[str] = mapped_column(String(120))
     auth_type: Mapped[str] = mapped_column(String(20), default="api_key", index=True)
     role: Mapped[str] = mapped_column(String(20), default="user", index=True)
+    username: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    password_salt: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    password_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     api_key_prefix: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
     api_key_hash: Mapped[str | None] = mapped_column(
         String(64), nullable=True, unique=True, index=True

@@ -2,13 +2,23 @@ import http from "node:http";
 
 const host = process.env.MOCK_BACKEND_HOST ?? "127.0.0.1";
 const port = Number(process.env.MOCK_BACKEND_PORT ?? 8000);
-const validToken = "tm_test_admin";
+const passwordToken = "tm_session.test_admin";
+const oidcToken = "tm_test_admin";
 
-const identity = {
+const passwordIdentity = {
   user_id: "ci-admin",
   display_name: "CI Admin",
+  username: "ci-admin",
   role: "admin",
-  auth_type: "api_key",
+  auth_type: "password",
+};
+
+const oidcIdentity = {
+  user_id: "ci-oidc-admin",
+  display_name: "CI Admin",
+  username: null,
+  role: "admin",
+  auth_type: "oidc",
 };
 
 function json(response, status, payload) {
@@ -19,15 +29,39 @@ function json(response, status, payload) {
   response.end(JSON.stringify(payload));
 }
 
-function authorized(request) {
-  return request.headers.authorization === `Bearer ${validToken}`;
+function bearerToken(request) {
+  const value = request.headers.authorization ?? "";
+  return value.startsWith("Bearer ") ? value.slice(7) : "";
 }
 
-const server = http.createServer((request, response) => {
+function authorized(request) {
+  const token = bearerToken(request);
+  return token === passwordToken || token === oidcToken;
+}
+
+async function requestJson(request) {
+  const chunks = [];
+  for await (const chunk of request) chunks.push(chunk);
+  try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return null; }
+}
+
+const server = http.createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", `http://localhost:${port}`);
 
   if (request.method === "GET" && url.pathname === "/health/ready") {
     return json(response, 200, { status: "ok", checks: { postgres: "ok", redis: "ok", qdrant: "ok" } });
+  }
+
+  if (request.method === "POST" && url.pathname === "/v1/auth/login") {
+    const payload = await requestJson(request);
+    if (payload?.username !== "ci-admin" || payload?.password !== "ci-password") {
+      return json(response, 401, { detail: "Invalid username or password" });
+    }
+    return json(response, 200, {
+      token: passwordToken,
+      ...passwordIdentity,
+      expires_in: 3600,
+    });
   }
 
   if (!authorized(request)) {
@@ -35,7 +69,7 @@ const server = http.createServer((request, response) => {
   }
 
   if (request.method === "GET" && url.pathname === "/v1/me") {
-    return json(response, 200, identity);
+    return json(response, 200, bearerToken(request) === oidcToken ? oidcIdentity : passwordIdentity);
   }
 
   if (request.method === "GET" && url.pathname === "/v1/ops/summary") {

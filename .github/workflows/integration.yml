@@ -38,10 +38,12 @@ jobs:
           set -euo pipefail
           cp .env.example .env
           sed -i 's/^OPS_ADMIN_KEY=.*/OPS_ADMIN_KEY=integration-admin-key/' .env
+          printf '\nSESSION_SIGNING_KEY=integration-session-signing-key-not-for-production-2026\n' >> .env
           # Keep the stack deterministic: no external OIDC, LLM or GitHub provider is required
           # for this control-plane gate. Corpus/LLM behavior is enforced by the dedicated
           # full-corpus and production-quality workflows.
           grep -q '^OPS_ADMIN_KEY=integration-admin-key$' .env
+          grep -q '^SESSION_SIGNING_KEY=integration-session-signing-key-not-for-production-2026$' .env
 
       - name: Build and start real storage, API, workers and Mission Control
         shell: bash

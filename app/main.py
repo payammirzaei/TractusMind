@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.routes.ask import router as ask_router
+from app.api.routes.auth import router as auth_router
 from app.api.routes.conversations import router as conversations_router
 from app.api.routes.feedback import router as feedback_router
 from app.api.routes.health import router as health_router
@@ -87,6 +88,7 @@ app = FastAPI(
     openapi_url="/openapi.json" if settings.docs_enabled else None,
 )
 app.include_router(health_router)
+app.include_router(auth_router)
 app.include_router(ask_router)
 app.include_router(conversations_router)
 app.include_router(feedback_router)

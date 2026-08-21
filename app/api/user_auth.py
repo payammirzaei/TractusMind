@@ -4,6 +4,7 @@ from fastapi import Header, HTTPException, Request, status
 
 from app.auth.oidc import OIDCAuthenticationError, OIDCProviderError
 from app.auth.store import UserIdentity
+from app.core.config import get_settings
 
 
 def _invalid_token() -> HTTPException:
@@ -29,7 +30,17 @@ async def optional_user(
     if scheme.casefold() != "bearer" or not token:
         raise _invalid_token()
 
-    if token.startswith("tm_"):
+    if token.startswith("tm_session."):
+        if len(token) > 4096:
+            raise _invalid_token()
+        signing_key = get_settings().session_signing_key
+        if not signing_key:
+            raise _invalid_token()
+        user = await request.app.state.auth_store.authenticate_session(
+            token,
+            signing_key=signing_key,
+        )
+    elif token.startswith("tm_"):
         if len(token) > 512:
             raise _invalid_token()
         user = await request.app.state.auth_store.authenticate(token)
