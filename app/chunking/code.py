@@ -85,6 +85,13 @@ class CodeChunker:
 
         if language == "python":
             declarations = self._python_declarations(document.content)
+        elif language == "java":
+            # Real Tractus-X Java sources can terminate the interpreter inside
+            # the native tree-sitter grammar. A SIGSEGV cannot be caught by
+            # Python, so Java deliberately uses deterministic line-bounded code
+            # chunks. This preserves source text, stable IDs, and exact line
+            # provenance; retrieval quality is verified by corpus calibration.
+            return self._safe_code_chunks(document)
         else:
             declarations = self._tree_sitter_declarations(document.content, language)
 
@@ -318,6 +325,26 @@ class CodeChunker:
                 if grandchild.type in target_types:
                     return grandchild
         return None
+
+    def _safe_code_chunks(self, document: RawDocument) -> list[KnowledgeChunk]:
+        chunks: list[KnowledgeChunk] = []
+        for text_range in split_text_by_lines(
+            document.content,
+            start_line=1,
+            max_chars=self.max_chars,
+            overlap_lines=4,
+        ):
+            chunks.append(
+                make_chunk(
+                    document,
+                    kind=ChunkKind.CODE_SYMBOL,
+                    text=text_range.text,
+                    start_line=text_range.start_line,
+                    end_line=text_range.end_line,
+                    part=text_range.part,
+                )
+            )
+        return chunks
 
     def _fallback_document_chunk(self, document: RawDocument) -> list[KnowledgeChunk]:
         chunks: list[KnowledgeChunk] = []
