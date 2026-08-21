@@ -9,6 +9,7 @@ from app.evaluation.performance_cli import (
     percentile,
     summarize_ms,
 )
+from app.evaluation.performance_gate import evaluate_performance_budget
 
 
 def test_percentile_interpolates_and_validates() -> None:
@@ -55,3 +56,69 @@ def test_load_cases_and_build_candidates(tmp_path: Path) -> None:
     assert all(len(candidate.text) == 500 for candidate in candidates)
     assert candidates[0].source_id == "tractusx-sdk"
     assert candidates[0].retrieval_methods == ["dense", "sparse"]
+
+
+def _performance_report(*, combined_p95_ms: float = 1228.5) -> dict[str, object]:
+    return {
+        "environment": {
+            "cpu_affinity": [0, 1],
+            "max_rss_mb": 901.7,
+        },
+        "workload": {
+            "candidates_per_query": 20,
+            "candidate_chars": 1200,
+            "rerank_limit": 6,
+        },
+        "steady_state": {
+            "dense_query": {"p95_ms": 71.8},
+            "sparse_query": {"p95_ms": 0.43},
+            "rerank": {"p95_ms": 1172.5},
+            "combined_model_compute": {"p95_ms": combined_p95_ms},
+        },
+    }
+
+
+def _write_budget(path: Path) -> None:
+    path.write_text(
+        """
+[workload]
+cpu_count = 2
+candidate_count = 20
+candidate_chars = 1200
+rerank_limit = 6
+
+[budget]
+dense_query_p95_ms = 150.0
+sparse_query_p95_ms = 10.0
+rerank_p95_ms = 1650.0
+combined_model_compute_p95_ms = 1750.0
+max_rss_mb = 1536.0
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def test_performance_budget_passes_measured_baseline(tmp_path: Path) -> None:
+    budget = tmp_path / "performance_gate.toml"
+    _write_budget(budget)
+
+    gate, violations = evaluate_performance_budget(_performance_report(), budget)
+
+    assert violations == []
+    assert gate["status"] == "pass"
+    assert gate["workload_checks"]["candidate_count"]["passed"] is True
+    assert gate["budget_checks"]["combined_model_compute_p95_ms"]["passed"] is True
+
+
+def test_performance_budget_fails_regression_after_recording_evidence(tmp_path: Path) -> None:
+    budget = tmp_path / "performance_gate.toml"
+    _write_budget(budget)
+
+    gate, violations = evaluate_performance_budget(
+        _performance_report(combined_p95_ms=1900.0),
+        budget,
+    )
+
+    assert gate["status"] == "fail"
+    assert any("combined_model_compute_p95_ms exceeded budget" in item for item in violations)
