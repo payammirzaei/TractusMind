@@ -2,175 +2,172 @@
 
 Snapshot date: **2026-08-21**.
 
-This document is the release-oriented view of the project. It intentionally distinguishes “implemented” from “verified” and “still requires external evidence.”
+This document distinguishes implementation completeness from release certification. TractusMind's v1 product implementation is effectively complete; the remaining work is evidence, external-provider certification, live deployment, and final repository/release administration.
 
-## Stage 1 — Green CI and security
+## Stage 1 — CI and security
 
 **Status: DONE**
 
-Verified work includes:
+Verified durable gates include:
 
 - backend CI/test path,
-- frontend install/audit/typecheck/build,
+- frontend dependency audit/typecheck/build,
 - production Next.js runtime smoke,
 - BFF/session smoke,
 - OIDC PKCE smoke,
-- OIDC-disabled fail-closed smoke,
-- production frontend Docker image smoke,
+- production frontend Docker smoke,
 - Compose topology validation,
-- repository/backend/frontend Trivy security scanning.
-
-Important security fixes completed during this stage:
-
-- patched React/Next dependency line,
-- removal of unnecessary npm/yarn/corepack tooling from the production UI image,
-- session rejection expiry,
-- explicit browser-SSO enable/fail-closed behavior.
+- repository/backend/frontend Trivy scanning.
 
 ## Stage 2 — Real full-stack integration
 
 **Status: DONE**
 
-A GitHub Actions integration gate has successfully exercised the real control plane with:
+The integration gate exercises PostgreSQL, Redis, Qdrant, migrations, FastAPI, worker, scheduler, Mission Control, readiness, admin bootstrap, HttpOnly session/BFF/RBAC, protected mutations, logout, and service survival.
 
-- PostgreSQL,
-- Redis,
-- Qdrant,
-- migrations,
-- FastAPI,
-- worker,
-- scheduler,
-- Mission Control,
-- BFF readiness,
-- real admin bootstrap,
-- HttpOnly session,
-- authenticated operator/admin endpoints,
-- protected mutation behavior,
-- logout,
-- service survival.
+## Stage 3 — Hardened production runtime
 
-The reverse-proxy origin/CSRF bug discovered by this gate was fixed without weakening explicit cross-site rejection.
+**Status: DONE FOR IMPLEMENTATION / CI EVIDENCE**
 
-## Stage 3 — Full corpus and calibration
+PR #12 merged the production-runtime gate and verified the hardened topology end to end with:
 
-**Status: ACTIVE / NOT YET CERTIFIED**
+- private data services,
+- read-only application roots,
+- dropped capabilities/no-new-privileges,
+- Caddy HTTPS and trusted internal CA,
+- Secure `__Host-` session behavior,
+- BFF/operator/admin paths,
+- explicit cross-site mutation rejection,
+- authenticated production smoke,
+- clean teardown.
 
-Completed infrastructure:
+PR #13 then added release preflight, backup/restore proof, release documentation, and fail-fast external-provider smoke requirements.
 
-- ephemeral PostgreSQL in GitHub Actions,
-- ephemeral Qdrant,
-- built-in GitHub Actions token for public Tractus-X source access,
-- clean database bootstrap,
-- six-source synchronization workflow,
-- corpus/ref validation steps,
-- retrieval benchmark steps,
-- debug benchmark steps,
-- zero-unsafe threshold candidate generation,
-- calibration artifact/reproducibility manifest output.
+## Stage 4 — Mission Control product finish
 
-Important blocker that was discovered and fixed:
+**Status: DONE**
 
-- real `tractusx-sdk` ingestion triggered native SIGSEGV during Python code parsing,
-- dense/sparse embedding paths were isolated and verified independently,
-- root cause was narrowed to Python tree-sitter parsing,
-- Python code chunking moved to standard-library AST,
-- regression coverage was added,
-- fix merged via PR #11.
+PR #14 merged the premium Mission Control polish while keeping operational data real rather than decorative.
 
-What remains for this stage:
+The final v1 visual direction is a modern industrial mission-control system: graphite chassis, recessed evidence wells, tactile controls, status LEDs, compact technical typography, restrained motion, and clear provenance/quality instrumentation.
 
-1. rerun the full six-source calibration on the latest `main`,
-2. confirm all source syncs complete,
-3. run retrieval and debug benchmarks,
-4. generate the measured threshold candidate,
-5. review and pin the final production threshold,
-6. keep the calibration manifest as release evidence.
+## Stage 5 — CPU-only production performance
 
-PR #9 remains a temporary calibration/measurement branch and should not be treated as product code merely because it exists.
+**Status: DONE FOR LOCAL MODEL PATH**
 
-## Stage 4 — Hardened production runtime
+PR #15 introduced a fail-closed CPU performance gate and production telemetry. The benchmark process was constrained to at most two CPUs.
 
-**Status: ACTIVE**
+Recorded repeat-gate evidence:
 
-The repository already contains the hardened production Compose architecture, Docker secrets model, Caddy edge, private data services, health/readiness endpoints, observability stack, backup/restore scripts and production smoke client.
+```text
+dense p95        51.4 ms   / budget 150 ms
+sparse p95        0.32 ms  / budget 10 ms
+reranker p95    944 ms     / budget 1650 ms
+combined p95    990 ms     / budget 1750 ms
+max RSS         893 MiB    / budget 1536 MiB
+```
 
-PR #12 is active validation work for a production-runtime gate that exercises the hardened topology end to end with local/internal HTTPS.
+Grafana/Prometheus now expose local-model latency and alerts for sustained dense/reranker regression. This supports a CPU-only Railway v1 query path; a GPU is not required by the measured local retrieval stack.
 
-Before considering this stage complete:
+## Stage 6 — Real-corpus ingestion hardening
 
-1. rebase/update the gate against current `main` if required,
-2. obtain green CI/security/runtime evidence,
-3. merge only the durable production-gate changes,
-4. remove temporary diagnostic-only artifacts/branches.
+**Status: IMPLEMENTATION DONE / FINAL CORPUS CERTIFICATION PENDING**
 
-## Stage 5 — External answer certification and live release
+Real six-source calibration attempts exposed multiple edge cases that synthetic/unit tests did not:
 
-**Status: NOT YET COMPLETE**
+1. Python tree-sitter SIGSEGV on real SDK code → replaced by stdlib AST chunking.
+2. Java native-parser risk → deterministic crash-safe Java chunking.
+3. legacy semantic-model text containing non-UTF-8 bytes → strict UTF-8 first with controlled CP1252 fallback; binary-looking blobs still fail closed.
+4. Turtle files where later prefix declarations could corrupt earlier chunk line ranges → streaming prefix context and regression coverage.
 
-These steps require real external inputs and therefore must not be faked in CI:
+The expensive calibration workflow is now **manual-only** with a larger timeout so normal PR changes do not trigger multi-hour corpus rebuilds.
 
-### Real LLM answer certification
+PR #9 was repurposed from a temporary measurement branch into durable ingestion/calibration hardening and has been merged.
 
-Provide an OpenAI-compatible provider configuration:
+What remains for corpus certification:
 
-- LLM base URL,
-- API key,
-- model identifier.
+1. run the manual six-source calibration once on the final release candidate,
+2. confirm all six source syncs complete,
+3. validate upstream refs,
+4. run retrieval/debug benchmarks,
+5. generate the zero-unsafe threshold candidate,
+6. human-review and pin `calibration.minimum_relevance_score`,
+7. retain the reproducibility manifest as release evidence.
 
-Then run grounded answer evaluation against the calibrated six-source corpus and verify citation/claim/abstention behavior.
+## Stage 7 — Railway live deployment
 
-### Real HTTPS deployment
+**Status: RUNBOOK READY / LIVE EVIDENCE PENDING**
 
-Deploy reviewed images to the actual target host/domain and verify:
+The Railway target is documented in `docs/railway-deployment.md`.
 
-- DNS/TLS,
-- production secrets,
-- backend readiness,
-- Mission Control health,
-- authenticated browser session,
-- core routes and operator/admin surfaces,
-- security headers,
-- monitoring,
-- backup procedure.
+Intended production boundary:
 
-Run the production smoke client against the real HTTPS endpoint.
+```text
+Mission Control   public HTTPS
+FastAPI           private
+PostgreSQL        private/managed
+Redis             private/managed
+Qdrant            private + persistent
+worker            private
+scheduler         private
+```
 
-### Final release
+The Next.js BFF remains the browser boundary. FastAPI and data services should not receive public domains.
 
-After all gates are green:
+Live deployment still needs real Railway resources, secrets, an LLM provider, and the final hostname/OIDC configuration.
 
-- clean temporary CI branches,
-- update final README/docs/screenshots/demo references,
-- verify changelog/release notes,
-- verify backend and Mission Control release images,
-- confirm SBOM/provenance output,
-- tag and publish **`v1.0.0`**.
+## Stage 8 — External answer certification
 
-## Repository hygiene items before v1
+**Status: PENDING REAL PROVIDER**
 
-These are release-hardening tasks rather than core product features:
+Required certification inputs:
 
-- delete stale diagnostic `ci/*` branches after evidence is consumed,
-- close obsolete diagnostic PRs,
-- consider enabling `main` branch protection with required release checks,
-- keep production secrets and `.env.production` outside Git,
-- ensure the final production OIDC redirect URI/domain is explicit when OIDC is enabled.
+```text
+QUALITY_LLM_BASE_URL
+QUALITY_LLM_API_KEY
+QUALITY_LLM_MODEL
+```
 
-## What “100%” means from here
+The real answer-quality run must verify zero unsafe answer/evidence acceptance, citation validation, claim verification, abstention behavior, and reviewed regressions.
 
-The software implementation is already in the final phase. The remaining work is primarily **certification and deployment evidence**.
+## Stage 9 — Repository/release administration
 
-TractusMind should only be called 100% / v1-ready when the following chain is true at the same time:
+**Status: PARTIAL**
+
+Current repo state:
+
+- no open PRs before release-status cleanup,
+- many historical diagnostic branches still exist,
+- `main` branch protection is currently disabled,
+- release tagging has not started.
+
+Before `v1.0.0`:
+
+1. enable `main` branch protection with the intended required checks,
+2. delete stale merged/diagnostic branches,
+3. keep only intentional release work,
+4. run release preflight on the exact candidate,
+5. tag `v1.0.0`,
+6. publish GHCR images/SBOM/provenance,
+7. repeat live smoke against the tagged deployment.
+
+## What “100%” means
+
+Feature implementation can be complete before release certification is complete. The final production release requires the whole evidence chain:
 
 ```text
 CI green
 + security green
-+ full-stack green
++ frontend/full-stack green
++ production-runtime green
++ CPU performance green
 + six-source corpus green
 + calibrated threshold pinned
-+ real LLM answer quality green
-+ hardened production runtime green
-+ live HTTPS smoke green
-+ release artifacts/docs complete
++ real LLM answer certification green
++ live Railway HTTPS smoke green
++ repository protection/cleanup complete
++ release preflight PASS
 = v1.0.0
 ```
+
+No remaining item should be replaced by a fabricated threshold, fake provider result, or assumed deployment success.
