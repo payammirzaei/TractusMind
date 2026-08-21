@@ -2,15 +2,21 @@ import asyncio
 import hashlib
 import secrets
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from uuid import uuid4
 
+import jwt
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.auth.models import UserAccount
 from app.db import verify_database_revision
+
+_SESSION_PREFIX = "tm_session."
+_SESSION_TYPE = "tractusmind-session"
+_PASSWORD_DUMMY_SALT = bytes(32)
 
 
 class UserRole(StrEnum):
@@ -42,6 +48,7 @@ class UserIdentity:
     enabled: bool
     role: UserRole
     auth_type: str
+    username: str | None = None
 
 
 @dataclass(frozen=True)
@@ -56,6 +63,21 @@ def _hash_api_key(api_key: str) -> str:
 
 def _new_api_key() -> str:
     return "tm_" + secrets.token_urlsafe(32)
+
+
+def _normalize_username(username: str) -> str:
+    return username.strip().casefold()
+
+
+def _password_digest(password: str, salt: bytes) -> str:
+    return hashlib.scrypt(
+        password.encode("utf-8"),
+        salt=salt,
+        n=2**14,
+        r=8,
+        p=1,
+        dklen=32,
+    ).hex()
 
 
 class AuthStore:
@@ -95,6 +117,61 @@ class AuthStore:
             identity = self._identity(user)
         return UserCredential(user=identity, api_key=api_key)
 
+    async def set_password_user(
+        self,
+        *,
+        username: str,
+        password: str,
+        display_name: str,
+        role: UserRole = UserRole.USER,
+        user_id: str | None = None,
+    ) -> UserIdentity:
+        """Create or convert one local account without ever persisting the plaintext password."""
+        await self.ensure_schema()
+        normalized = _normalize_username(username)
+        if not normalized or len(normalized) > 80:
+            raise ValueError("username must contain 1-80 characters")
+        if len(password) < 12:
+            raise ValueError("password must contain at least 12 characters")
+        clean_name = display_name.strip()
+        if not clean_name:
+            raise ValueError("display_name must not be blank")
+
+        salt = secrets.token_bytes(32)
+        password_hash = _password_digest(password, salt)
+        async with self.sessions.begin() as session:
+            user = await session.get(UserAccount, user_id) if user_id else None
+            if user is None:
+                user = await session.scalar(
+                    select(UserAccount).where(UserAccount.username == normalized)
+                )
+            if user is None:
+                user = UserAccount(user_id=user_id or str(uuid4()), display_name=clean_name)
+                session.add(user)
+            else:
+                conflicting = await session.scalar(
+                    select(UserAccount).where(
+                        UserAccount.username == normalized,
+                        UserAccount.user_id != user.user_id,
+                    )
+                )
+                if conflicting is not None:
+                    raise ValueError("username is already in use")
+
+            user.display_name = clean_name[:120]
+            user.auth_type = "password"
+            user.role = role.value
+            user.username = normalized
+            user.password_salt = salt.hex()
+            user.password_hash = password_hash
+            user.api_key_prefix = None
+            user.api_key_hash = None
+            user.oidc_issuer = None
+            user.oidc_subject = None
+            user.enabled = True
+            await session.flush()
+            return self._identity(user)
+
     async def authenticate(self, api_key: str) -> UserIdentity | None:
         await self.ensure_schema()
         digest = _hash_api_key(api_key)
@@ -107,6 +184,74 @@ class AuthStore:
                 )
             )
         return self._identity(user) if user is not None else None
+
+    async def authenticate_password(self, username: str, password: str) -> UserIdentity | None:
+        await self.ensure_schema()
+        normalized = _normalize_username(username)
+        async with self.sessions() as session:
+            user = await session.scalar(
+                select(UserAccount).where(
+                    UserAccount.auth_type == "password",
+                    UserAccount.username == normalized,
+                    UserAccount.enabled.is_(True),
+                )
+            )
+
+        salt = _PASSWORD_DUMMY_SALT
+        expected = "0" * 64
+        if user is not None and user.password_salt and user.password_hash:
+            try:
+                salt = bytes.fromhex(user.password_salt)
+            except ValueError:
+                return None
+            expected = user.password_hash
+        candidate = _password_digest(password, salt)
+        if user is None or not secrets.compare_digest(candidate, expected):
+            return None
+        return self._identity(user)
+
+    @staticmethod
+    def issue_session(
+        identity: UserIdentity,
+        *,
+        signing_key: str,
+        ttl_seconds: int,
+    ) -> str:
+        now = datetime.now(UTC)
+        payload = {
+            "sub": identity.user_id,
+            "typ": _SESSION_TYPE,
+            "iat": now,
+            "exp": now + timedelta(seconds=ttl_seconds),
+            "jti": secrets.token_urlsafe(18),
+        }
+        token = jwt.encode(payload, signing_key, algorithm="HS256")
+        return _SESSION_PREFIX + token
+
+    async def authenticate_session(
+        self,
+        token: str,
+        *,
+        signing_key: str,
+    ) -> UserIdentity | None:
+        await self.ensure_schema()
+        if not token.startswith(_SESSION_PREFIX):
+            return None
+        encoded = token.removeprefix(_SESSION_PREFIX)
+        try:
+            payload = jwt.decode(encoded, signing_key, algorithms=["HS256"])
+        except jwt.InvalidTokenError:
+            return None
+        if payload.get("typ") != _SESSION_TYPE:
+            return None
+        user_id = payload.get("sub")
+        if not isinstance(user_id, str) or not user_id:
+            return None
+        async with self.sessions() as session:
+            user = await session.get(UserAccount, user_id)
+        if user is None or not user.enabled or user.auth_type != "password":
+            return None
+        return self._identity(user)
 
     async def authenticate_oidc_identity(
         self,
@@ -128,6 +273,9 @@ class AuthStore:
                     role=role.value,
                     oidc_issuer=issuer,
                     oidc_subject=subject,
+                    username=None,
+                    password_salt=None,
+                    password_hash=None,
                     api_key_prefix=None,
                     api_key_hash=None,
                     enabled=True,
@@ -206,4 +354,5 @@ class AuthStore:
             enabled=user.enabled,
             role=UserRole(user.role),
             auth_type=user.auth_type,
+            username=user.username,
         )
