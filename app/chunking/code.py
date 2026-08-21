@@ -1,3 +1,4 @@
+import ast
 from collections.abc import Iterator
 from dataclasses import dataclass
 
@@ -11,7 +12,6 @@ from app.ingestion.models import RawDocument
 _SUPPORTED_LANGUAGES = {"python", "java", "kotlin", "typescript", "javascript"}
 
 _DECLARATION_TYPES: dict[str, set[str]] = {
-    "python": {"class_definition", "function_definition"},
     "java": {
         "class_declaration",
         "interface_declaration",
@@ -42,7 +42,6 @@ _DECLARATION_TYPES: dict[str, set[str]] = {
 }
 
 _CLASS_LIKE_TYPES = {
-    "class_definition",
     "class_declaration",
     "interface_declaration",
     "enum_declaration",
@@ -51,7 +50,6 @@ _CLASS_LIKE_TYPES = {
 }
 
 _METHOD_LIKE_TYPES = {
-    "function_definition",
     "function_declaration",
     "method_declaration",
     "constructor_declaration",
@@ -59,10 +57,13 @@ _METHOD_LIKE_TYPES = {
     "secondary_constructor",
 }
 
+_PYTHON_DECLARATION_TYPES = (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+_PYTHON_METHOD_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef)
+
 
 @dataclass(frozen=True)
 class _DeclarationSnapshot:
-    """Pure-Python declaration data detached from native tree-sitter nodes."""
+    """Declaration data detached from parser-specific node objects."""
 
     symbol: str
     parent_symbol: str | None
@@ -82,20 +83,10 @@ class CodeChunker:
         if language not in _SUPPORTED_LANGUAGES:
             raise ValueError(f"Unsupported code language: {language}")
 
-        source_bytes = document.content.encode("utf-8")
-        parser = get_parser(language)
-        tree = parser.parse(source_bytes)
-
-        # Do not retain tree-sitter Node objects after traversal. Some native
-        # parser/language-pack combinations can invalidate retained child/parent
-        # handles while Python later materializes chunks, causing an uncatchable
-        # SIGSEGV. Snapshot all required data while the tree is unquestionably
-        # alive, then build KnowledgeChunk objects from plain Python values.
-        declarations = list(
-            self._walk_declarations(tree.root_node, language, source_bytes)
-        )
-        del tree
-        del parser
+        if language == "python":
+            declarations = self._python_declarations(document.content)
+        else:
+            declarations = self._tree_sitter_declarations(document.content, language)
 
         if not declarations:
             return self._fallback_document_chunk(document)
@@ -122,10 +113,140 @@ class CodeChunker:
                     )
                 )
 
-        chunks.sort(key=lambda chunk: (chunk.start_line, chunk.end_line, chunk.symbol or ""))
+        chunks.sort(
+            key=lambda chunk: (
+                chunk.start_line,
+                chunk.end_line,
+                chunk.symbol or "",
+            )
+        )
         return self._deduplicate(chunks)
 
-    def _walk_declarations(
+    def _python_declarations(self, source: str) -> list[_DeclarationSnapshot]:
+        """Parse Python with the stdlib AST instead of a native parser.
+
+        Tractus-X contains valid Python sources that trigger a native SIGSEGV in
+        the tree-sitter Python grammar used by the language pack. A segfault is
+        not catchable in Python, so Python sources deliberately use the stdlib
+        parser while the other supported languages keep tree-sitter semantics.
+        """
+        try:
+            tree = ast.parse(source)
+        except (SyntaxError, ValueError, TypeError, MemoryError):
+            return []
+
+        source_lines = source.splitlines(keepends=True)
+        return list(
+            self._walk_python_declarations(
+                tree,
+                source_lines,
+                parent_symbol=None,
+            )
+        )
+
+    def _walk_python_declarations(
+        self,
+        node: ast.AST,
+        source_lines: list[str],
+        parent_symbol: str | None,
+    ) -> Iterator[_DeclarationSnapshot]:
+        current_parent = parent_symbol
+
+        if isinstance(node, _PYTHON_DECLARATION_TYPES):
+            snapshot = self._snapshot_python_declaration(
+                node,
+                source_lines,
+                parent_symbol,
+            )
+            yield snapshot
+            current_parent = node.name
+
+        for child in ast.iter_child_nodes(node):
+            yield from self._walk_python_declarations(
+                child,
+                source_lines,
+                current_parent,
+            )
+
+    def _snapshot_python_declaration(
+        self,
+        node: ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef,
+        source_lines: list[str],
+        parent_symbol: str | None,
+    ) -> _DeclarationSnapshot:
+        decorator_lines = [
+            decorator.lineno
+            for decorator in node.decorator_list
+            if getattr(decorator, "lineno", None) is not None
+        ]
+        start_line = min([node.lineno, *decorator_lines])
+        end_line = node.end_lineno or node.lineno
+        text = "".join(source_lines[start_line - 1 : end_line])
+
+        if isinstance(node, ast.ClassDef) and len(text) > self.max_chars:
+            text = self._python_class_context_text(
+                node,
+                source_lines,
+                start_line=start_line,
+                end_line=end_line,
+                full_text=text,
+            )
+
+        return _DeclarationSnapshot(
+            symbol=node.name,
+            parent_symbol=parent_symbol,
+            text=text,
+            start_line=start_line,
+        )
+
+    def _python_class_context_text(
+        self,
+        node: ast.ClassDef,
+        source_lines: list[str],
+        *,
+        start_line: int,
+        end_line: int,
+        full_text: str,
+    ) -> str:
+        first_method = next(
+            (member for member in node.body if isinstance(member, _PYTHON_METHOD_TYPES)),
+            None,
+        )
+        context_end_line = (
+            max(start_line, first_method.lineno - 1)
+            if first_method is not None
+            else end_line
+        )
+        context = "".join(
+            source_lines[start_line - 1 : context_end_line]
+        ).strip()
+        if len(context) >= 200:
+            return context[: self.max_chars]
+        return full_text[: self.max_chars]
+
+    def _tree_sitter_declarations(
+        self,
+        source: str,
+        language: str,
+    ) -> list[_DeclarationSnapshot]:
+        source_bytes = source.encode("utf-8")
+        parser = get_parser(language)
+        tree = parser.parse(source_bytes)
+
+        # Materialize primitive data while the native tree is alive. No Node
+        # handles are retained after this call returns.
+        declarations = list(
+            self._walk_tree_sitter_declarations(
+                tree.root_node,
+                language,
+                source_bytes,
+            )
+        )
+        del tree
+        del parser
+        return declarations
+
+    def _walk_tree_sitter_declarations(
         self,
         node: Node,
         language: str,
@@ -138,15 +259,12 @@ class CodeChunker:
         if node.type in declaration_types:
             symbol = self._symbol_name(node, source_bytes)
             if symbol:
-                effective_node = self._include_python_decorators(node, language)
-                node_text = source_bytes[
-                    effective_node.start_byte : effective_node.end_byte
-                ].decode("utf-8")
-                start_line = effective_node.start_point.row + 1
+                node_text = source_bytes[node.start_byte : node.end_byte].decode("utf-8")
+                start_line = node.start_point.row + 1
 
                 if node.type in _CLASS_LIKE_TYPES and len(node_text) > self.max_chars:
                     node_text = self._class_context_text(
-                        effective_node,
+                        node,
                         source_bytes,
                         language,
                     )
@@ -161,7 +279,7 @@ class CodeChunker:
                     current_parent = symbol
 
         for child in node.children:
-            yield from self._walk_declarations(
+            yield from self._walk_tree_sitter_declarations(
                 child,
                 language,
                 source_bytes,
@@ -178,15 +296,6 @@ class CodeChunker:
         if name_node is None:
             return None
         return source_bytes[name_node.start_byte : name_node.end_byte].decode("utf-8").strip()
-
-    def _include_python_decorators(self, node: Node, language: str) -> Node:
-        if (
-            language == "python"
-            and node.parent is not None
-            and node.parent.type == "decorated_definition"
-        ):
-            return node.parent
-        return node
 
     def _class_context_text(self, node: Node, source_bytes: bytes, language: str) -> str:
         method_types = _DECLARATION_TYPES[language] & _METHOD_LIKE_TYPES
