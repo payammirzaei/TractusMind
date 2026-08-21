@@ -2,13 +2,14 @@ import http from "node:http";
 
 const host = process.env.MOCK_BACKEND_HOST ?? "127.0.0.1";
 const port = Number(process.env.MOCK_BACKEND_PORT ?? 8000);
-const validToken = "tm_test_admin";
+const validToken = "tm_session.test_admin";
 
 const identity = {
   user_id: "ci-admin",
   display_name: "CI Admin",
+  username: "ci-admin",
   role: "admin",
-  auth_type: "api_key",
+  auth_type: "password",
 };
 
 function json(response, status, payload) {
@@ -23,11 +24,29 @@ function authorized(request) {
   return request.headers.authorization === `Bearer ${validToken}`;
 }
 
-const server = http.createServer((request, response) => {
+async function requestJson(request) {
+  const chunks = [];
+  for await (const chunk of request) chunks.push(chunk);
+  try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return null; }
+}
+
+const server = http.createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", `http://localhost:${port}`);
 
   if (request.method === "GET" && url.pathname === "/health/ready") {
     return json(response, 200, { status: "ok", checks: { postgres: "ok", redis: "ok", qdrant: "ok" } });
+  }
+
+  if (request.method === "POST" && url.pathname === "/v1/auth/login") {
+    const payload = await requestJson(request);
+    if (payload?.username !== "ci-admin" || payload?.password !== "ci-password") {
+      return json(response, 401, { detail: "Invalid username or password" });
+    }
+    return json(response, 200, {
+      token: validToken,
+      ...identity,
+      expires_in: 3600,
+    });
   }
 
   if (!authorized(request)) {
