@@ -1,0 +1,206 @@
+name: Production Runtime
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/production-runtime.yml"
+      - "docker-compose.prod.yml"
+      - "docker-compose.ui.prod.yml"
+      - "config/Caddyfile.ui.prod"
+      - "scripts/production_smoke.py"
+      - ".env.production.example"
+      - "Dockerfile"
+      - "frontend/Dockerfile"
+
+permissions:
+  contents: read
+
+jobs:
+  production-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      COMPOSE_PROJECT_NAME: tractusmind_prod_ci
+      COMPOSE_CMD: docker compose --env-file .env.production -f docker-compose.prod.yml -f docker-compose.ui.prod.yml
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Prepare isolated production environment and Docker secrets
+        shell: bash
+        env:
+          CI_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cp .env.production.example .env.production
+          sed -i 's/^TRACTUSMIND_DOMAIN=.*/TRACTUSMIND_DOMAIN=localhost/' .env.production
+          sed -i 's/^ACME_EMAIL=.*/ACME_EMAIL=ci@localhost.invalid/' .env.production
+          sed -i 's/^TRUSTED_HOSTS=.*/TRUSTED_HOSTS=localhost,frontend,api,127.0.0.1/' .env.production
+          sed -i 's|^LLM_BASE_URL=.*|LLM_BASE_URL=https://provider.invalid/v1|' .env.production
+          sed -i 's/^LLM_MODEL=.*/LLM_MODEL=ci-no-provider-call/' .env.production
+          sed -i 's/^OIDC_ENABLED=.*/OIDC_ENABLED=false/' .env.production
+          sed -i 's|^TRACTUSMIND_OIDC_REDIRECT_URI=.*|TRACTUSMIND_OIDC_REDIRECT_URI=https://localhost/api/oidc/callback|' .env.production
+          cat >> .env.production <<'EOF'
+          API_MEMORY_LIMIT=2g
+          API_CPU_LIMIT=2.0
+          WORKER_MEMORY_LIMIT=2g
+          WORKER_CPU_LIMIT=2.0
+          QDRANT_MEMORY_LIMIT=1g
+          QDRANT_CPU_LIMIT=1.0
+          POSTGRES_MEMORY_LIMIT=1g
+          POSTGRES_CPU_LIMIT=1.0
+          REDIS_MEMORY_LIMIT=512m
+          REDIS_CPU_LIMIT=0.5
+          FRONTEND_MEMORY_LIMIT=768m
+          FRONTEND_CPU_LIMIT=1.0
+          CADDY_MEMORY_LIMIT=256m
+          CADDY_CPU_LIMIT=0.5
+          SCHEDULER_MEMORY_LIMIT=256m
+          SCHEDULER_CPU_LIMIT=0.5
+          EOF
+
+          mkdir -p secrets artifacts/production-runtime
+          chmod 700 secrets
+          pg_password='ci-postgres-4e1f7d907c7e'
+          redis_password='ci-redis-73a03c7ab82b'
+          printf '%s\n' "$pg_password" > secrets/postgres_password
+          printf '%s\n' "postgresql+asyncpg://tractusmind:${pg_password}@postgres:5432/tractusmind" > secrets/database_url
+          printf '%s\n' "$redis_password" > secrets/redis_password
+          printf '%s\n' "redis://:${redis_password}@redis:6379/0" > secrets/redis_url
+          printf '%s\n' 'ci-no-provider-call' > secrets/llm_api_key
+          printf '%s\n' "$CI_GITHUB_TOKEN" > secrets/github_token
+          printf '%s\n' 'ci-break-glass-admin-913eb444' > secrets/ops_admin_key
+          printf '%s\n' 'ci-metrics-admin-a697de14' > secrets/metrics_admin_key
+          printf '%s\n' 'ci-grafana-admin-9137fe21' > secrets/grafana_admin_password
+          chmod 600 secrets/*
+
+      - name: Validate composed hardened production topology
+        shell: bash
+        run: |
+          set -euo pipefail
+          $COMPOSE_CMD config --quiet
+
+      - name: Build and start hardened production core
+        shell: bash
+        run: |
+          set -euo pipefail
+          $COMPOSE_CMD up -d --build \
+            postgres redis qdrant migrate api worker scheduler frontend caddy
+
+      - name: Verify private services stay unpublished and app roots are read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          for service_port in 'api 8000' 'postgres 5432' 'redis 6379' 'qdrant 6333'; do
+            set -- $service_port
+            if $COMPOSE_CMD port "$1" "$2" 2>/dev/null | grep -q .; then
+              echo "$1:$2 unexpectedly has a host-published port"
+              exit 1
+            fi
+          done
+
+          for service in api worker scheduler frontend; do
+            cid="$($COMPOSE_CMD ps -q "$service")"
+            test -n "$cid"
+            test "$(docker inspect -f '{{.HostConfig.ReadonlyRootfs}}' "$cid")" = true
+            docker inspect -f '{{json .HostConfig.CapDrop}}' "$cid" | grep -q 'ALL'
+            docker inspect -f '{{json .HostConfig.SecurityOpt}}' "$cid" | grep -q 'no-new-privileges'
+          done
+
+      - name: Trust the Caddy internal CA generated for localhost
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if $COMPOSE_CMD exec -T caddy \
+              test -f /data/caddy/pki/authorities/local/root.crt 2>/dev/null; then
+              $COMPOSE_CMD exec -T caddy \
+                cat /data/caddy/pki/authorities/local/root.crt \
+                > artifacts/production-runtime/caddy-root.crt
+              break
+            fi
+            sleep 2
+          done
+          test -s artifacts/production-runtime/caddy-root.crt
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error \
+              --cacert artifacts/production-runtime/caddy-root.crt \
+              https://localhost/api/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'Caddy HTTPS edge did not become ready'
+          exit 1
+
+      - name: Provision a real admin API identity through the private production API
+        id: credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          api_key="$($COMPOSE_CMD exec -T api python - <<'PY'
+          import json
+          import urllib.request
+          from pathlib import Path
+
+          admin_key = Path('/run/secrets/ops_admin_key').read_text().strip()
+          payload = json.dumps({'display_name': 'Production Smoke Admin', 'role': 'admin'}).encode()
+          request = urllib.request.Request(
+              'http://127.0.0.1:8000/v1/ops/users',
+              data=payload,
+              method='POST',
+              headers={
+                  'Accept': 'application/json',
+                  'Content-Type': 'application/json',
+                  'X-TractusMind-Admin-Key': admin_key,
+              },
+          )
+          with urllib.request.urlopen(request, timeout=20) as response:
+              body = json.loads(response.read().decode())
+          api_key = body['api_key']
+          if not api_key.startswith('tm_'):
+              raise RuntimeError('unexpected API key shape')
+          print(api_key)
+          PY
+          )"
+          test "${api_key#tm_}" != "$api_key"
+          echo "api_key=$api_key" >> "$GITHUB_OUTPUT"
+          echo "::add-mask::$api_key"
+
+      - name: Run authenticated HTTPS production smoke
+        shell: bash
+        env:
+          TRACTUSMIND_PRODUCTION_URL: https://localhost
+          TRACTUSMIND_PRODUCTION_SMOKE_API_KEY: ${{ steps.credential.outputs.api_key }}
+          TRACTUSMIND_PRODUCTION_SMOKE_CA_FILE: artifacts/production-runtime/caddy-root.crt
+        run: |
+          set -euo pipefail
+          python scripts/production_smoke.py
+
+      - name: Capture production runtime state
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          $COMPOSE_CMD ps -a > artifacts/production-runtime/compose-ps.txt 2>&1
+          $COMPOSE_CMD logs --no-color --tail=250 \
+            api worker scheduler frontend caddy postgres redis qdrant \
+            > artifacts/production-runtime/compose.log 2>&1
+
+      - name: Upload production diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tractusmind-production-runtime-${{ github.sha }}
+          path: artifacts/production-runtime
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Tear down hardened production core
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          $COMPOSE_CMD down -v --remove-orphans
+          rm -rf secrets .env.production
