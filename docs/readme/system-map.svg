@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="680" viewBox="0 0 1200 680" role="img" aria-labelledby="title desc">
+  <title id="title">TractusMind system architecture</title>
+  <desc id="desc">Animated architecture map showing ingestion, knowledge, retrieval, trust and experience planes.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#070b12"/><stop offset="1" stop-color="#0b1320"/></linearGradient>
+    <linearGradient id="cyan" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#22d3ee"/><stop offset="1" stop-color="#38bdf8"/></linearGradient>
+    <linearGradient id="amber" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#f59e0b"/><stop offset="1" stop-color="#fbbf24"/></linearGradient>
+    <filter id="glow"><feGaussianBlur stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <style>
+      .t{font-family:Inter,ui-sans-serif,system-ui,sans-serif;fill:#e5eef8}.m{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;fill:#7f8da3}.k{font-family:Inter,ui-sans-serif,system-ui,sans-serif;fill:#8ea0b8}.box{fill:#0d1522;stroke:#203047;stroke-width:1}.hot{stroke:#22d3ee}.amb{stroke:#f59e0b}.lane{stroke:#26364d;stroke-width:2;fill:none;stroke-dasharray:5 7}.flow{stroke:url(#cyan);stroke-width:2.5;fill:none;stroke-dasharray:8 12;animation:dash 2s linear infinite}.flow2{stroke:url(#amber);stroke-width:2.5;fill:none;stroke-dasharray:8 12;animation:dash 2.6s linear infinite}.pulse{animation:pulse 1.8s ease-in-out infinite}.packet{animation:blink 1.3s ease-in-out infinite}@keyframes dash{to{stroke-dashoffset:-40}}@keyframes pulse{50%{opacity:.38}}@keyframes blink{50%{opacity:.25}}
+    </style>
+  </defs>
+  <rect width="1200" height="680" rx="26" fill="url(#bg)"/>
+  <g opacity=".28"><path d="M0 60H1200M0 120H1200M0 180H1200M0 240H1200M0 300H1200M0 360H1200M0 420H1200M0 480H1200M0 540H1200M0 600H1200" stroke="#18304a"/><path d="M100 0V680M200 0V680M300 0V680M400 0V680M500 0V680M600 0V680M700 0V680M800 0V680M900 0V680M1000 0V680M1100 0V680" stroke="#10233a"/></g>
+  <text x="54" y="58" class="t" font-size="27" font-weight="800">TractusMind — inspectable knowledge system</text>
+  <text x="54" y="84" class="k" font-size="13">A production RAG architecture split into explicit planes, state transitions and trust boundaries.</text>
+
+  <g transform="translate(54 120)">
+    <rect class="box hot" width="205" height="470" rx="18"/>
+    <text x="22" y="36" class="t" font-size="15" font-weight="700">01 · Ingestion plane</text><text x="22" y="58" class="m" font-size="10">source lifecycle</text>
+    <g transform="translate(18 88)"><rect class="box" width="169" height="58" rx="12"/><text x="16" y="24" class="t" font-size="12" font-weight="600">Source registry</text><text x="16" y="43" class="m" font-size="9">repo · ref · priority</text></g>
+    <path class="flow" d="M103 146V180"/>
+    <g transform="translate(18 180)"><rect class="box" width="169" height="74" rx="12"/><text x="16" y="24" class="t" font-size="12" font-weight="600">Discovery + fetch</text><text x="16" y="43" class="m" font-size="9">snapshot-aware GitHub</text><text x="16" y="59" class="m" font-size="9">incremental diff</text></g>
+    <path class="flow" d="M103 254V288"/>
+    <g transform="translate(18 288)"><rect class="box" width="169" height="74" rx="12"/><text x="16" y="24" class="t" font-size="12" font-weight="600">Smart chunking</text><text x="16" y="43" class="m" font-size="9">Markdown · code · YAML</text><text x="16" y="59" class="m" font-size="9">Turtle · provenance</text></g>
+    <path class="flow" d="M103 362V396"/>
+    <g transform="translate(18 396)"><rect class="box" width="169" height="56" rx="12"/><text x="16" y="23" class="t" font-size="12" font-weight="600">Dense + sparse</text><text x="16" y="42" class="m" font-size="9">embedding / BM25</text></g>
+  </g>
+
+  <g transform="translate(282 120)">
+    <rect class="box" width="205" height="470" rx="18"/>
+    <text x="22" y="36" class="t" font-size="15" font-weight="700">02 · Knowledge plane</text><text x="22" y="58" class="m" font-size="10">versioned evidence</text>
+    <g transform="translate(18 88)"><rect class="box hot" width="169" height="82" rx="12"/><text x="16" y="25" class="t" font-size="12" font-weight="600">Qdrant</text><text x="16" y="44" class="m" font-size="9">dense vectors</text><text x="16" y="60" class="m" font-size="9">sparse vectors</text></g>
+    <g transform="translate(18 194)"><rect class="box" width="169" height="82" rx="12"/><text x="16" y="25" class="t" font-size="12" font-weight="600">PostgreSQL</text><text x="16" y="44" class="m" font-size="9">runs · state · users</text><text x="16" y="60" class="m" font-size="9">conversations · quality</text></g>
+    <g transform="translate(18 300)"><rect class="box" width="169" height="68" rx="12"/><text x="16" y="25" class="t" font-size="12" font-weight="600">Redis</text><text x="16" y="44" class="m" font-size="9">locks · jobs · coordination</text></g>
+    <g transform="translate(18 392)"><rect class="box amb" width="169" height="60" rx="12"/><text x="16" y="24" class="t" font-size="12" font-weight="600">Snapshot contract</text><text x="16" y="43" class="m" font-size="9">ref → commit → chunk</text></g>
+  </g>
+
+  <g transform="translate(510 120)">
+    <rect class="box hot" width="205" height="470" rx="18"/>
+    <text x="22" y="36" class="t" font-size="15" font-weight="700">03 · Retrieval plane</text><text x="22" y="58" class="m" font-size="10">query execution</text>
+    <g transform="translate(18 88)"><rect class="box" width="169" height="58" rx="12"/><text x="16" y="24" class="t" font-size="12" font-weight="600">Deterministic route</text><text x="16" y="43" class="m" font-size="9">intent · source · ref</text></g>
+    <path class="flow" d="M103 146V176"/>
+    <g transform="translate(18 176)"><rect class="box" width="169" height="82" rx="12"/><text x="16" y="24" class="t" font-size="12" font-weight="600">Hybrid retrieval</text><text x="16" y="43" class="m" font-size="9">dense + BM25</text><text x="16" y="59" class="m" font-size="9">exact debug lane</text></g>
+    <path class="flow" d="M103 258V288"/>
+    <g transform="translate(18 288)"><rect class="box" width="169" height="68" rx="12"/><text x="16" y="24" class="t" font-size="12" font-weight="600">RRF fusion</text><text x="16" y="43" class="m" font-size="9">candidate consolidation</text></g>
+    <path class="flow" d="M103 356V386"/>
+    <g transform="translate(18 386)"><rect class="box hot" width="169" height="66" rx="12"/><text x="16" y="24" class="t" font-size="12" font-weight="600">Rerank + threshold</text><text x="16" y="43" class="m" font-size="9">calibrated evidence gate</text></g>
+  </g>
+
+  <g transform="translate(738 120)">
+    <rect class="box amb" width="205" height="470" rx="18"/>
+    <text x="22" y="36" class="t" font-size="15" font-weight="700">04 · Trust plane</text><text x="22" y="58" class="m" font-size="10">answer safety</text>
+    <g transform="translate(18 88)"><rect class="box" width="169" height="66" rx="12"/><text x="16" y="24" class="t" font-size="12" font-weight="600">Grounded generation</text><text x="16" y="43" class="m" font-size="9">evidence-only synthesis</text></g>
+    <path class="flow2" d="M103 154V188"/>
+    <g transform="translate(18 188)"><rect class="box" width="169" height="66" rx="12"/><text x="16" y="24" class="t" font-size="12" font-weight="600">Citation gate</text><text x="16" y="43" class="m" font-size="9">backend-owned provenance</text></g>
+    <path class="flow2" d="M103 254V288"/>
+    <g transform="translate(18 288)"><rect class="box" width="169" height="76" rx="12"/><text x="16" y="24" class="t" font-size="12" font-weight="600">Claim verifier</text><text x="16" y="43" class="m" font-size="9">atomic claims</text><text x="16" y="59" class="m" font-size="9">support / reject</text></g>
+    <path class="flow2" d="M103 364V398"/>
+    <g transform="translate(18 398)"><rect class="box amb" width="169" height="54" rx="12"/><text x="16" y="23" class="t" font-size="12" font-weight="600">Answer or abstain</text><text x="16" y="41" class="m" font-size="9">fail closed</text></g>
+  </g>
+
+  <g transform="translate(966 120)">
+    <rect class="box hot" width="180" height="470" rx="18"/>
+    <text x="20" y="36" class="t" font-size="15" font-weight="700">05 · Experience</text><text x="20" y="58" class="m" font-size="10">Mission Control</text>
+    <g transform="translate(16 88)"><rect class="box" width="148" height="58" rx="12"/><text x="14" y="24" class="t" font-size="12" font-weight="600">Copilot</text><text x="14" y="43" class="m" font-size="9">answer + evidence</text></g>
+    <g transform="translate(16 164)"><rect class="box" width="148" height="58" rx="12"/><text x="14" y="24" class="t" font-size="12" font-weight="600">Sources</text><text x="14" y="43" class="m" font-size="9">version / snapshot</text></g>
+    <g transform="translate(16 240)"><rect class="box" width="148" height="58" rx="12"/><text x="14" y="24" class="t" font-size="12" font-weight="600">Operations</text><text x="14" y="43" class="m" font-size="9">runs / health</text></g>
+    <g transform="translate(16 316)"><rect class="box" width="148" height="58" rx="12"/><text x="14" y="24" class="t" font-size="12" font-weight="600">Quality</text><text x="14" y="43" class="m" font-size="9">review / regressions</text></g>
+    <g transform="translate(16 392)"><rect class="box" width="148" height="60" rx="12"/><text x="14" y="24" class="t" font-size="12" font-weight="600">Access</text><text x="14" y="43" class="m" font-size="9">RBAC / sessions</text></g>
+  </g>
+
+  <path class="flow" d="M259 355H282M487 355H510M715 355H738M943 355H966"/>
+  <circle cx="270" cy="355" r="4" fill="#22d3ee" filter="url(#glow)" class="packet"/><circle cx="498" cy="355" r="4" fill="#22d3ee" filter="url(#glow)" class="packet"/><circle cx="726" cy="355" r="4" fill="#f59e0b" filter="url(#glow)" class="packet"/><circle cx="954" cy="355" r="4" fill="#22d3ee" filter="url(#glow)" class="packet"/>
+  <text x="54" y="636" class="m" font-size="10">BOUNDARY RULE: previous assistant text is context, never evidence · provenance is carried with every indexed chunk · unsupported answers fail closed</text>
+</svg>
