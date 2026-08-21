@@ -1,3 +1,4 @@
+# Temporary diagnostic: rerun against the tree-sitter node snapshot fix.
 name: Embedding Native Smoke
 
 on:
