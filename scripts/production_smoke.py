@@ -10,10 +10,12 @@ import ssl
 import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
 from urllib.parse import urlparse
 
 BASE_URL = os.environ.get("TRACTUSMIND_PRODUCTION_URL", "").rstrip("/")
 API_KEY = os.environ.get("TRACTUSMIND_PRODUCTION_SMOKE_API_KEY", "")
+CA_FILE = os.environ.get("TRACTUSMIND_PRODUCTION_SMOKE_CA_FILE", "").strip()
 
 
 def fail(message: str) -> None:
@@ -38,10 +40,12 @@ def main() -> int:
         fail("Production URL must be an absolute HTTPS URL")
     if not API_KEY.startswith("tm_"):
         fail("TRACTUSMIND_PRODUCTION_SMOKE_API_KEY must be a TractusMind API key")
+    if CA_FILE and not Path(CA_FILE).is_file():
+        fail(f"Production smoke CA file does not exist: {CA_FILE}")
 
     cookie_jar = http.cookiejar.CookieJar()
     opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
-    context = ssl.create_default_context()
+    context = ssl.create_default_context(cafile=CA_FILE or None)
     opener.add_handler(urllib.request.HTTPSHandler(context=context))
 
     def call(
@@ -50,14 +54,16 @@ def main() -> int:
         method: str = "GET",
         payload: dict[str, object] | None = None,
         expected: tuple[int, ...] = (200,),
+        origin: str | None = None,
+        fetch_site: str | None = None,
     ) -> tuple[int, object, dict[str, str]]:
         data = None
         headers = {"Accept": "application/json"}
         if payload is not None:
             data = json.dumps(payload).encode("utf-8")
             headers["Content-Type"] = "application/json"
-            headers["Origin"] = BASE_URL
-            headers["Sec-Fetch-Site"] = "same-origin"
+            headers["Origin"] = origin or BASE_URL
+            headers["Sec-Fetch-Site"] = fetch_site or "same-origin"
         req = urllib.request.Request(
             f"{BASE_URL}{path}", data=data, method=method, headers=headers
         )
@@ -103,10 +109,33 @@ def main() -> int:
     _, backend_health, _ = call("/api/backend/health/ready")
     assert_dependency_health(backend_health)
 
+    print("[prod-smoke] verifying browser mutation boundary rejects cross-site requests")
+    call(
+        "/api/session",
+        method="POST",
+        payload={"token": API_KEY},
+        expected=(403,),
+        origin="https://cross-site.invalid",
+        fetch_site="cross-site",
+    )
+
     print("[prod-smoke] authenticating through the real Mission Control session boundary")
-    _, identity, _ = call("/api/session", method="POST", payload={"token": API_KEY})
+    _, identity, session_headers = call(
+        "/api/session", method="POST", payload={"token": API_KEY}
+    )
     if not isinstance(identity, dict) or not identity.get("user_id"):
         fail(f"Unexpected production identity: {identity}")
+    set_cookie = session_headers.get("set-cookie", "")
+    required_cookie_fragments = (
+        "__Host-tm_session=",
+        "HttpOnly",
+        "Secure",
+        "SameSite=Lax",
+        "Path=/",
+    )
+    for fragment in required_cookie_fragments:
+        if fragment.lower() not in set_cookie.lower():
+            fail(f"Production session cookie is missing {fragment!r}: {set_cookie!r}")
 
     print("[prod-smoke] checking authenticated session and product surfaces")
     call("/api/session")
