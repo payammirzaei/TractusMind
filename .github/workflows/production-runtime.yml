@@ -99,10 +99,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for service_port in 'api 8000' 'postgres 5432' 'redis 6379' 'qdrant 6333'; do
-            set -- $service_port
-            if $COMPOSE_CMD port "$1" "$2" 2>/dev/null | grep -q .; then
-              echo "$1:$2 unexpectedly has a host-published port"
+
+          for service in api postgres redis qdrant; do
+            cid="$($COMPOSE_CMD ps -q "$service")"
+            test -n "$cid"
+            bindings="$(docker inspect -f '{{json .HostConfig.PortBindings}}' "$cid")"
+            if [ "$bindings" != "{}" ] && [ "$bindings" != "null" ]; then
+              echo "$service unexpectedly has host-published ports: $bindings"
               exit 1
             fi
           done
