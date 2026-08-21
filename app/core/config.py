@@ -11,6 +11,7 @@ _SECRET_FILE_FIELDS = {
     "qdrant_api_key": "qdrant_api_key_file",
     "github_token": "github_token_file",
     "llm_api_key": "llm_api_key_file",
+    "session_signing_key": "session_signing_key_file",
     "ops_admin_key": "ops_admin_key_file",
     "metrics_admin_key": "metrics_admin_key_file",
 }
@@ -74,6 +75,10 @@ class Settings(pydantic_settings.BaseSettings):
     verification_max_claims: int = pydantic.Field(default=12, ge=1, le=50)
     history_max_turns: int = pydantic.Field(default=6, ge=1, le=20)
     history_max_chars: int = pydantic.Field(default=6_000, ge=500, le=30_000)
+
+    session_signing_key: str | None = None
+    session_signing_key_file: str | None = None
+    session_ttl_seconds: int = pydantic.Field(default=28_800, ge=300, le=604_800)
 
     oidc_enabled: bool = False
     oidc_issuer_url: str | None = None
@@ -139,6 +144,8 @@ class Settings(pydantic_settings.BaseSettings):
             except OSError as exc:
                 raise ValueError(f"Unable to read secret file for {target}: {path}") from exc
             object.__setattr__(self, target, value)
+        if self.session_signing_key and len(self.session_signing_key) < 32:
+            raise ValueError("SESSION_SIGNING_KEY must contain at least 32 characters")
         if self.oidc_enabled and not self.oidc_issuer_url:
             raise ValueError("OIDC_ISSUER_URL is required when OIDC_ENABLED=true")
         if self.oidc_enabled:
