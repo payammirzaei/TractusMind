@@ -44,9 +44,11 @@ def main() -> int:
         fail(f"Production smoke CA file does not exist: {CA_FILE}")
 
     cookie_jar = http.cookiejar.CookieJar()
-    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
     context = ssl.create_default_context(cafile=CA_FILE or None)
-    opener.add_handler(urllib.request.HTTPSHandler(context=context))
+    opener = urllib.request.build_opener(
+        urllib.request.HTTPSHandler(context=context),
+        urllib.request.HTTPCookieProcessor(cookie_jar),
+    )
 
     def call(
         path: str,
