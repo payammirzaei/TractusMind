@@ -4,6 +4,7 @@ from app.core.config import Settings
 from app.ingestion.models import SourceDefinition, SourcePriority
 from app.workers import scheduler
 from app.workers import sync as worker_sync
+from app.workers.tasks import SOURCE_SYNC_TIME_LIMIT_MS, sync_source_task
 
 
 class FakeMessage:
@@ -61,6 +62,11 @@ def _source(source_id: str) -> SourceDefinition:
         component="test",
         priority=SourcePriority.HIGH,
     )
+
+
+def test_source_sync_actor_has_full_corpus_time_budget() -> None:
+    assert SOURCE_SYNC_TIME_LIMIT_MS == 14_400_000
+    assert sync_source_task.options["time_limit"] == SOURCE_SYNC_TIME_LIMIT_MS
 
 
 def test_scheduler_enqueues_each_enabled_source(monkeypatch: pytest.MonkeyPatch) -> None:
