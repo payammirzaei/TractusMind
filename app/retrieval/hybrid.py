@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from math import ceil
 
 import structlog
@@ -14,6 +14,7 @@ from app.routing.filters import build_route_filter
 from app.routing.models import QueryRoute
 
 logger = structlog.get_logger()
+IndexProgressCallback = Callable[[int], Awaitable[None]]
 
 
 class HybridRetrievalService:
@@ -39,6 +40,7 @@ class HybridRetrievalService:
         chunks: Sequence[KnowledgeChunk],
         *,
         remove_stale_source_versions: bool = False,
+        progress_callback: IndexProgressCallback | None = None,
     ) -> int:
         if not chunks:
             return 0
@@ -101,6 +103,8 @@ class HybridRetrievalService:
                 sparse_model=self.sparse_embedder.model_name,
             )
             indexed += batch_indexed
+            if progress_callback is not None:
+                await progress_callback(indexed)
             logger.info(
                 "index_batch_succeeded",
                 batch_index=batch_index,
