@@ -1,0 +1,18 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "Dockerfile",
+    "watchPatterns": [
+      "/app/**",
+      "/config/**",
+      "/pyproject.toml",
+      "/Dockerfile",
+      "/deploy/railway/worker.railway.json"
+    ]
+  },
+  "deploy": {
+    "startCommand": "/bin/sh -c \"mkdir -p /tmp/dramatiq-prometheus && rm -f /tmp/dramatiq-prometheus/* && exec dramatiq app.workers.tasks --processes 1 --threads 1\"",
+    "restartPolicyType": "ALWAYS"
+  }
+}
