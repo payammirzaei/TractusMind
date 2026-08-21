@@ -4,20 +4,23 @@
 
 TractusMind answers architecture, documentation, coding, debugging, semantic-model, and version-specific questions from traceable Tractus-X sources. It is designed around provenance, retrieval quality, measurable evaluation, operational safety, and inspectability rather than opaque AI behavior.
 
+> **Project journey:** [`docs/project-history/`](docs/project-history/) documents what has been built, the architectural decisions, incidents/root causes, CI milestones, production work, and the exact remaining path to `v1.0.0`.
+
 ## Mission Control
 
-The V22 control surface lives in `frontend/` and uses **Next.js 16.3 + React 19.2 + Tailwind CSS 4.3 + shadcn-compatible components + Motion**.
+The V23 Mission Control surface lives in `frontend/` and uses **Next.js 16.3 + React 19.2 + Tailwind CSS 4.3 + shadcn-compatible components + Motion**.
 
 Its visual language is modern industrial skeuomorphism: graphite chassis, recessed evidence wells, tactile controls, status LEDs, and restrained cyan/amber instrumentation. Chat content stays comparatively flat for readability.
 
 Functional consoles:
 
-- **Copilot** — grounded chat, citation markers, feedback, route/verification metadata
+- **Copilot** — grounded chat, citations, feedback, routing/evidence/verification metadata
+- **Command Center** — live readiness, source/ingestion/quality state and system topology
 - **Evidence Inspector** — repo, ref, snapshot commit, content commit, file/lines, retrieval/rerank/debug scores
 - **Sources** — source registry, snapshot state, file counts, admin sync controls
-- **Operations** — ingestion summary and run channel
+- **Operations** — ingestion summary, runs and errors
 - **Quality** — human review queue and regression status
-- **Access** — API-key identity provisioning and enable/disable controls
+- **Admin** — API-key identity provisioning, role and lifecycle controls
 
 Navigation is RBAC-aware: `user < operator < admin`.
 
@@ -104,9 +107,11 @@ npm run dev
 
 ## Mission Control security boundary
 
-The browser does **not** keep the bearer credential in localStorage. `/api/session` validates it against backend `/v1/me` and stores it in an HttpOnly, SameSite cookie. Browser requests then use the Next.js BFF endpoint `/api/backend/*`, which proxies only allowlisted `v1` and `health` backend paths.
+The browser does **not** keep the bearer credential in localStorage. `/api/session` validates it against backend `/v1/me` and stores it in an HttpOnly, SameSite cookie. Browser requests then use the Next.js BFF endpoint `/api/backend/*`, which proxies only allowlisted backend paths and methods.
 
-This keeps the FastAPI service private in the production UI topology while preserving the existing API-key and OIDC/JWKS authentication model.
+Production uses a Secure `__Host-` session cookie. Rejected/revoked backend sessions are expired immediately, and Mission Control revalidates active sessions periodically and on browser focus.
+
+Browser SSO uses **Authorization Code + PKCE** as a public client. No frontend client secret is required. SSO fails closed unless explicitly enabled and fully configured.
 
 See [`docs/mission-control.md`](docs/mission-control.md).
 
@@ -184,43 +189,55 @@ See [`docs/production-deployment.md`](docs/production-deployment.md) and [`docs/
 
 ## Validation gates
 
-Backend CI validates Ruff, migrations/drift, PostgreSQL-backed tests, Compose/Prometheus/Grafana configuration and security checks.
+The repository now uses multiple independent release gates.
+
+Backend/general CI validates linting, migrations/schema behavior, PostgreSQL-backed tests and configuration correctness.
 
 Frontend CI validates:
 
-1. production dependency audit at HIGH severity,
+1. dependency audit,
 2. TypeScript typecheck,
 3. Next.js production build,
-4. runtime Docker image build.
+4. production route/BFF/OIDC smokes,
+5. production Docker image startup and smoke,
+6. development/production Compose topology.
+
+Security CI scans the repository plus backend and Mission Control container images with Trivy.
+
+A real **Full Stack Integration** gate boots PostgreSQL, Redis, Qdrant, migrations, FastAPI, worker, scheduler and Mission Control together, then exercises readiness, admin bootstrap, HttpOnly session/BFF/RBAC, protected mutations and logout.
 
 ## Current milestone
 
-**V22 — Mission Control UI**
+**V23 — Mission Control + v1 production hardening**
 
-Implemented in the current cut:
+Implemented and verified:
 
-- [x] Next.js/Tailwind/shadcn/Motion foundation
-- [x] industrial skeuomorphic design system
+- [x] source-grounded backend/RAG pipeline
+- [x] incremental six-source ingestion architecture
+- [x] grounded citations + claim verification
+- [x] conversations, feedback and quality review loop
+- [x] API-key + OIDC/JWKS authentication
+- [x] Next.js Mission Control and Command Center
 - [x] HttpOnly BFF authentication boundary
-- [x] role-aware navigation
-- [x] grounded chat workbench
-- [x] source/provenance inspector
-- [x] route + claim-verification visibility
-- [x] feedback wired to backend quality loop
-- [x] source registry + admin sync
-- [x] ingestion operations console
-- [x] quality review console
-- [x] user/API-key administration
-- [x] dedicated frontend CI/build/security gate
-- [x] dev and production Compose overlays
-- [x] Caddy-to-Mission-Control production edge
+- [x] enterprise browser SSO with Authorization Code + PKCE
+- [x] role-aware Sources/Ops/Quality/Admin consoles
+- [x] frontend production runtime smoke suite
+- [x] Trivy security gates
+- [x] real full-stack Docker integration gate
+- [x] hardened production Compose architecture
+- [x] Tractus-X SDK Python-ingestion SIGSEGV root cause and AST-based fix
 
-Still environment-dependent rather than missing backend/UI code:
+Remaining certification/release work:
 
-- [ ] run the first complete V20 full-corpus measurement and pin the reviewed threshold
-- [ ] validate a production Keycloak/Entra token shape
-- [ ] connect the real Alertmanager receiver
-- [ ] run the V22 frontend Actions build on the deployment environment and fix any platform-specific issue it exposes
+- [ ] rerun complete six-source corpus calibration after the ingestion fix
+- [ ] review and pin the measured evidence threshold
+- [ ] run grounded-answer certification against a real OpenAI-compatible LLM
+- [ ] finish/merge the hardened production-runtime gate
+- [ ] deploy to the real HTTPS target and pass production smoke
+- [ ] clean stale diagnostic branches/PRs
+- [ ] publish/tag `v1.0.0`
+
+For the detailed history and exact status, start at [`docs/project-history/README.md`](docs/project-history/README.md).
 
 ## License
 
