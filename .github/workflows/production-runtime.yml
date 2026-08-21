@@ -12,6 +12,7 @@ on:
       - ".env.production.example"
       - "Dockerfile"
       - "frontend/Dockerfile"
+      - "docs/production-deployment.md"
 
 permissions:
   contents: read
@@ -73,7 +74,13 @@ jobs:
           printf '%s\n' 'ci-break-glass-admin-913eb444' > secrets/ops_admin_key
           printf '%s\n' 'ci-metrics-admin-a697de14' > secrets/metrics_admin_key
           printf '%s\n' 'ci-grafana-admin-9137fe21' > secrets/grafana_admin_password
-          chmod 600 secrets/*
+
+          # Compose file-backed secrets are bind mounts. Their uid/gid/mode
+          # cannot be remapped for the non-root application user, so the files
+          # are read-only to the host but readable inside explicitly granted
+          # service containers. The parent directory remains owner-only (0700),
+          # preserving host-side confidentiality.
+          chmod 644 secrets/*
 
       - name: Validate composed hardened production topology
         shell: bash
