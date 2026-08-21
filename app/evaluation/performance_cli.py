@@ -222,7 +222,10 @@ async def measure(args: argparse.Namespace) -> dict[str, object]:
             "Combined model compute measures dense query embedding, sparse query embedding, "
             "and reranking sequentially, matching the current CPU model order.",
             "Qdrant network/search latency and external LLM latency are intentionally excluded.",
-            "Cold-start timings include local model initialization and may include first-run downloads.",
+            (
+                "Cold-start timings include local model initialization and may include "
+                "first-run downloads."
+            ),
         ],
     }
 
