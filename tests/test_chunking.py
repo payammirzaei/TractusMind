@@ -166,6 +166,30 @@ def test_yaml_chunking_uses_top_level_keys() -> None:
     assert chunks[1].end_line == 4
 
 
+def test_turtle_chunking_scopes_prefixes_by_source_order() -> None:
+    document = _document(
+        path="semantic/model.ttl",
+        content=(
+            "<urn:first> <urn:predicate> <urn:object> .\n"
+            "@prefix ex: <https://example.org/> .\n"
+            "ex:second ex:predicate ex:object .\n"
+        ),
+        content_type="semantic_model",
+        language="turtle",
+    )
+
+    chunks = SmartChunker().chunk(document)
+
+    assert len(chunks) == 2
+    assert chunks[0].start_line == 1
+    assert chunks[0].end_line == 1
+    assert "@prefix" not in chunks[0].text
+    assert chunks[1].start_line == 2
+    assert chunks[1].end_line == 3
+    assert chunks[1].text.startswith("@prefix ex:")
+    assert all(chunk.end_line >= chunk.start_line for chunk in chunks)
+
+
 def test_chunk_ids_are_stable_for_same_document() -> None:
     document = _document(
         path="README.md",
