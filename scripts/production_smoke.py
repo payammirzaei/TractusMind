@@ -32,6 +32,35 @@ def assert_dependency_health(body: object) -> None:
         fail(f"Production dependency health is not green: {checks}")
 
 
+def assert_browser_policy(headers: dict[str, str]) -> None:
+    csp = headers.get("content-security-policy", "")
+    for fragment in (
+        "default-src 'self'",
+        "frame-ancestors 'none'",
+        "connect-src 'self'",
+    ):
+        if fragment not in csp:
+            fail(f"Production CSP is missing {fragment!r}: {csp!r}")
+
+    script_policy = next(
+        (
+            directive.strip()
+            for directive in csp.split(";")
+            if directive.strip().startswith("script-src ")
+        ),
+        "",
+    )
+    if "'strict-dynamic'" not in script_policy:
+        fail(f"Production script CSP is missing strict-dynamic: {script_policy!r}")
+    if "'unsafe-inline'" in script_policy:
+        fail(f"Production script CSP permits unsafe-inline: {script_policy!r}")
+    if not any(
+        token.startswith("'nonce-") and token.endswith("'")
+        for token in script_policy.split()
+    ):
+        fail(f"Production script CSP is missing a per-request nonce: {script_policy!r}")
+
+
 def main() -> int:
     if not BASE_URL:
         fail("TRACTUSMIND_PRODUCTION_URL is required")
@@ -95,12 +124,12 @@ def main() -> int:
         "x-content-type-options": "nosniff",
         "x-frame-options": "DENY",
         "referrer-policy": "no-referrer",
-        "content-security-policy": "default-src 'self'",
     }
     for name, fragment in required_headers.items():
         value = headers.get(name, "")
         if fragment.lower() not in value.lower():
             fail(f"Missing/invalid {name}: {value!r}")
+    assert_browser_policy(headers)
     if "server" in headers or "x-powered-by" in headers:
         fail("Production response exposes a server technology header")
 
