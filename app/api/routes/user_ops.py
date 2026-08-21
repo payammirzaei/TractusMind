@@ -22,6 +22,7 @@ router = APIRouter(
 class UserResponse(BaseModel):
     user_id: str
     display_name: str
+    username: str | None = None
     api_key_prefix: str | None
     enabled: bool
     role: UserRole
