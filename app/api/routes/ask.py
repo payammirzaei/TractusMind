@@ -113,6 +113,7 @@ async def ask(
         logger.exception(
             "answer_persistence_failed",
             error_type=type(exc).__name__,
+            error_detail=str(exc)[:2_000],
         )
         return answer
 
@@ -160,6 +161,7 @@ async def _finish_and_persist_failure(
         logger.exception(
             "answer_failure_persistence_failed",
             error_type=type(exc).__name__,
+            error_detail=str(exc)[:2_000],
         )
         return
 
