@@ -11,6 +11,7 @@ permissions:
 
 jobs:
   calibrate:
+    # Release-candidate measurement after crash-safe Python and Java chunking.
     runs-on: ubuntu-latest
     timeout-minutes: 120
     services:
