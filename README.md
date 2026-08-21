@@ -2,23 +2,23 @@
 
 **A source-grounded AI engineering copilot for the Tractus-X ecosystem — with an inspectable Mission Control UI.**
 
-TractusMind answers architecture, documentation, coding, debugging, semantic-model, and version-specific questions from traceable Tractus-X sources. It is designed around provenance, retrieval quality, measurable evaluation, operational safety, and inspectability rather than opaque AI behavior.
+TractusMind answers architecture, documentation, coding, debugging, semantic-model, and version-specific questions from traceable Tractus-X sources. The system is designed around provenance, measurable retrieval quality, fail-closed evidence handling, operational safety, and inspectability rather than opaque AI behavior.
 
-> **Project journey:** [`docs/project-history/`](docs/project-history/) documents what has been built, the architectural decisions, incidents/root causes, CI milestones, production work, and the exact remaining path to `v1.0.0`.
+> **Release status:** the v1 implementation is feature-complete. Remaining work is release certification and live deployment evidence: one final six-source calibration, threshold pinning, real-LLM answer certification, live Railway smoke, repository protection/branch cleanup, and the `v1.0.0` tag.
 
 ## Mission Control
 
-The V23 Mission Control surface lives in `frontend/` and uses **Next.js 16.3 + React 19.2 + Tailwind CSS 4.3 + shadcn-compatible components + Motion**.
+The production UI lives in `frontend/` and uses **Next.js 16.3 + React 19.2 + Tailwind CSS 4.3 + shadcn-compatible components + Motion**.
 
-Its visual language is modern industrial skeuomorphism: graphite chassis, recessed evidence wells, tactile controls, status LEDs, and restrained cyan/amber instrumentation. Chat content stays comparatively flat for readability.
+Its visual language is a modern industrial mission-control system: graphite chassis, recessed evidence wells, tactile controls, status LEDs, restrained cyan/amber instrumentation, and compact technical typography.
 
-Functional consoles:
+Main surfaces:
 
 - **Copilot** — grounded chat, citations, feedback, routing/evidence/verification metadata
-- **Command Center** — live readiness, source/ingestion/quality state and system topology
+- **Command Center** — readiness, source/ingestion/quality state, topology and live operations
 - **Evidence Inspector** — repo, ref, snapshot commit, content commit, file/lines, retrieval/rerank/debug scores
-- **Sources** — source registry, snapshot state, file counts, admin sync controls
-- **Operations** — ingestion summary, runs and errors
+- **Sources** — registry, snapshot state, file counts, admin sync controls
+- **Operations** — ingestion summaries, runs and errors
 - **Quality** — human review queue and regression status
 - **Admin** — API-key identity provisioning, role and lifecycle controls
 
@@ -28,25 +28,25 @@ Navigation is RBAC-aware: `user < operator < admin`.
 
 - FastAPI grounded answer API
 - allowlisted, commit-pinned Tractus-X GitHub ingestion
-- structure-aware Markdown/code/YAML/Turtle chunking with crash-safe Python/Java paths
+- Markdown/code/YAML/Turtle chunking with crash-safe Python and Java paths
 - Qdrant dense + BM25 hybrid retrieval
 - exact debug retrieval lane + RRF fusion
 - cross-encoder reranking
 - deterministic source/version/ref/commit routing
 - OpenAI-compatible grounded generation
 - backend-owned citations + atomic claim verification
-- bounded provider retries, idempotency, and circuit breakers
+- abstention when evidence is insufficient
 - incremental PostgreSQL/Qdrant synchronization
 - Redis + Dramatiq background ingestion
 - persisted conversations, traces, feedback, and human quality review
 - API-key identities + enterprise OIDC/JWKS
 - user/operator/admin RBAC
 - Alembic migrations + ORM drift checks
-- six-source full-corpus validation + calibration workflow
-- production quality gate + reviewed regressions
+- six-source corpus validation + manual release calibration workflow
 - Prometheus/OpenTelemetry/Grafana/Alertmanager observability
-- hardened production Compose + Caddy TLS + Docker secrets
-- Trivy security CI + GHCR images with SBOM/provenance
+- hardened production Compose + Caddy reference topology
+- Railway production runbook
+- Trivy security CI + GHCR release images with SBOM/provenance
 
 ## Grounded answer pipeline
 
@@ -66,7 +66,23 @@ question
   -> answer or abstention
 ```
 
-History is context, not evidence. Previous assistant answers cannot become source citations. Explicit `ref:` and `commit:` constraints fail closed when indexed provenance is unavailable.
+History is context, never evidence. Previous assistant answers cannot become source citations. Explicit `ref:` and `commit:` constraints fail closed when indexed provenance is unavailable.
+
+## Authentication and browser security
+
+The browser does **not** keep backend bearer credentials in localStorage. Mission Control creates an HttpOnly session through `/api/session` and accesses FastAPI through the allowlisted Next.js BFF path `/api/backend/*`.
+
+Production behavior includes:
+
+- Secure `__Host-` session cookie
+- SameSite session protection
+- explicit cross-site mutation rejection
+- per-request nonce CSP with `strict-dynamic`
+- OIDC Authorization Code + PKCE when enabled
+- backend JWT issuer/audience/signature validation
+- periodic session revalidation and immediate expiry of rejected sessions
+
+See [`docs/mission-control.md`](docs/mission-control.md).
 
 ## Local development
 
@@ -96,156 +112,96 @@ Alertmanager    http://localhost:9093
 Qdrant          http://localhost:6333/dashboard
 ```
 
-Frontend only:
+## CPU-only production profile
 
-```bash
-cd frontend
-cp .env.example .env.local
-npm install
-npm run dev
-```
+A dedicated CI gate measures the local retrieval-model path with the benchmark process constrained to at most two CPUs.
 
-## Mission Control security boundary
-
-The browser does **not** keep the bearer credential in localStorage. `/api/session` validates it against backend `/v1/me` and stores it in an HttpOnly, SameSite cookie. Browser requests then use the Next.js BFF endpoint `/api/backend/*`, which proxies only allowlisted backend paths and methods.
-
-Production uses a Secure `__Host-` session cookie. Rejected/revoked backend sessions are expired immediately, and Mission Control revalidates active sessions periodically and on browser focus.
-
-HTML responses use a per-request nonce CSP with `strict-dynamic`; production does not rely on `unsafe-inline` for script execution. Caddy preserves the application CSP and adds the public-edge HSTS policy.
-
-Browser SSO uses **Authorization Code + PKCE** as a public client. No frontend client secret is required. SSO fails closed unless explicitly enabled and fully configured.
-
-See [`docs/mission-control.md`](docs/mission-control.md).
-
-## Authentication and RBAC
+Latest certified two-CPU evidence before release cleanup:
 
 ```text
-Authorization: Bearer tm_...
-             or
-Authorization: Bearer <OIDC JWT>
+dense p95        51.4 ms   / budget 150 ms
+sparse p95        0.32 ms  / budget 10 ms
+reranker p95    944 ms     / budget 1650 ms
+combined p95    990 ms     / budget 1750 ms
+max RSS         893 MiB    / budget 1536 MiB
 ```
 
-OIDC uses discovery + JWKS and validates issuer, expiry, configured audience, asymmetric signing algorithm, and signing key. Unknown `kid` values trigger one JWKS refresh for normal key rotation.
+The gate is fail-closed, and production Prometheus/Grafana expose local-model latency with alerts for sustained dense/reranker regressions. A GPU is not required for the v1 query path.
 
-Roles:
+See [`docs/cpu-performance.md`](docs/cpu-performance.md).
 
-```text
-user < operator < admin
-```
+## Full-corpus calibration
 
-- **user** — ask, owned conversations, feedback
-- **operator** — user capabilities + read-only operations/quality inspection
-- **admin** — operator capabilities + sync, quality decisions, identity lifecycle
+The release calibration covers all six enabled Tractus-X sources: SDK, EDC, Digital Twin Registry, semantic models, Tractus-X docs, and release metadata.
 
-OIDC identities are persisted by `(issuer, subject)`. OIDC roles stay IdP-managed; TractusMind can locally disable an external identity but does not override its role. `OPS_ADMIN_KEY` remains only as break-glass admin access.
+The workflow is intentionally **manual-only** because a clean six-source rebuild can take hours. It validates the corpus and upstream refs, runs retrieval/debug benchmarks, measures the zero-unsafe evidence threshold, and produces reproducibility artifacts.
 
-## Full-corpus validation
+Real corpus runs exposed and led to durable fixes for:
 
-A benchmark run is valid only after the indexed corpus passes consistency and optional upstream-freshness checks:
+- Python tree-sitter native SIGSEGV → replaced with stdlib AST chunking
+- Java parser crash risk → deterministic crash-safe Java chunking
+- legacy semantic-model text encoding → UTF-8 first with controlled CP1252 fallback
+- Turtle prefix/line provenance edge case → streaming prefix context with valid line ranges
 
-```bash
-tractusmind-corpus-validate --verify-upstream
-```
-
-V1 retrieval/answer datasets cover all six enabled sources: SDK, EDC, Digital Twin Registry, semantic models, Tractus-X docs, and release metadata.
-
-The measured evidence threshold is never auto-committed. Human review is required before pinning it in `config/quality_gate.toml`.
+The measured evidence threshold is never auto-committed. Human review is required before pinning `calibration.minimum_relevance_score` in `config/quality_gate.toml`.
 
 See [`docs/full-corpus-validation.md`](docs/full-corpus-validation.md) and [`docs/quality-gate.md`](docs/quality-gate.md).
 
-## Human-reviewed quality loop
-
-```text
-failed answer / down-vote
-          ↓
- pending quality review
-          ↓
-     human root cause
-       /       \
-  dismiss    promote
-                ↓
-         regression case
-                ↓
-         benchmark export
-                ↓
-          evaluation gate
-```
-
-Raw feedback never becomes gold data automatically.
-
 ## Production deployment
 
-Backend production topology remains in `docker-compose.prod.yml`. Mission Control is added through `docker-compose.ui.prod.yml`; Caddy becomes the sole public edge and proxies to the frontend, while the frontend reaches FastAPI only over the private backend network.
+Two production paths are documented:
 
-```bash
-docker compose \
-  --env-file .env.production \
-  -f docker-compose.prod.yml \
-  -f docker-compose.ui.prod.yml \
-  up -d --build
+- **Self-hosted hardened Compose:** [`docs/production-deployment.md`](docs/production-deployment.md)
+- **Railway target topology:** [`docs/railway-deployment.md`](docs/railway-deployment.md)
+
+For Railway, the intended v1 topology is:
+
+```text
+Internet
+   |
+Railway HTTPS
+   |
+Mission Control (public)
+   |
+private BFF -> FastAPI
+                |-- PostgreSQL
+                |-- Redis
+                |-- Qdrant
+                |-- external LLM
+
+worker + scheduler remain private
 ```
 
-PostgreSQL, Redis, and Qdrant remain private. Grafana/Prometheus/Alertmanager remain operator-only loopback services.
+Only Mission Control should receive a public domain. FastAPI, Qdrant, PostgreSQL, Redis, worker and scheduler remain private.
 
-The hardened Production Runtime gate now proves the composed topology end to end in CI: private service exposure, read-only application roots, Caddy HTTPS, certificate verification, real admin provisioning, Mission Control session/BFF/RBAC behavior, and clean teardown.
+## Verified release engineering
 
-See [`docs/production-deployment.md`](docs/production-deployment.md) and [`docs/mission-control.md`](docs/mission-control.md).
+Durable gates already merged into `main`:
 
-## Validation gates
+- [x] backend/general CI
+- [x] frontend production build/runtime/BFF/OIDC smoke
+- [x] Trivy repository + backend + Mission Control image scanning
+- [x] real Full Stack Integration gate
+- [x] hardened Production Runtime HTTPS gate
+- [x] release preflight that blocks unsafe/unpinned releases
+- [x] PostgreSQL backup/restore smoke
+- [x] CPU-only performance budget gate
+- [x] Grafana local-model p95 telemetry + performance alerts
+- [x] premium Mission Control UI polish
+- [x] crash-safe real-corpus ingestion fixes
+- [x] Railway deployment runbook
 
-The repository uses multiple independent release gates.
+## Remaining path to `v1.0.0`
 
-Backend/general CI validates linting, migrations/schema behavior, PostgreSQL-backed tests and configuration correctness.
+1. run the **manual six-source calibration** once on the final candidate,
+2. review and pin the measured evidence threshold,
+3. run grounded-answer certification against the selected real OpenAI-compatible LLM,
+4. deploy to Railway and pass live HTTPS/session/BFF/health/security-header smoke,
+5. enable `main` branch protection and remove stale diagnostic branches,
+6. run `python scripts/release_preflight.py` on the exact candidate,
+7. tag and publish **`v1.0.0`**.
 
-Frontend CI validates:
-
-1. dependency audit,
-2. TypeScript typecheck,
-3. Next.js production build,
-4. production route/BFF/OIDC smokes,
-5. production Docker image startup and smoke,
-6. development/production Compose topology.
-
-Security CI scans the repository plus backend and Mission Control container images with Trivy.
-
-A real **Full Stack Integration** gate boots PostgreSQL, Redis, Qdrant, migrations, FastAPI, worker, scheduler and Mission Control together, then exercises readiness, admin bootstrap, HttpOnly session/BFF/RBAC, protected mutations and logout.
-
-A separate **Production Runtime** gate proves the hardened HTTPS deployment topology rather than only validating Compose syntax.
-
-## Current milestone
-
-**V23 — Mission Control + v1 production hardening**
-
-Implemented and verified:
-
-- [x] source-grounded backend/RAG pipeline
-- [x] incremental six-source ingestion architecture
-- [x] grounded citations + claim verification
-- [x] conversations, feedback and quality review loop
-- [x] API-key + OIDC/JWKS authentication
-- [x] Next.js Mission Control and Command Center
-- [x] HttpOnly BFF authentication boundary
-- [x] enterprise browser SSO with Authorization Code + PKCE
-- [x] role-aware Sources/Ops/Quality/Admin consoles
-- [x] per-request nonce CSP + browser-policy smoke
-- [x] frontend production runtime smoke suite
-- [x] Trivy security gates
-- [x] real full-stack Docker integration gate
-- [x] hardened production Compose architecture
-- [x] hardened production runtime HTTPS gate
-- [x] Tractus-X SDK Python-ingestion SIGSEGV root cause and AST-based fix
-- [x] crash-safe Java ingestion path for EDC/Digital Twin corpus sources
-
-Remaining certification/release work:
-
-- [ ] complete the six-source corpus calibration run
-- [ ] review and pin the measured evidence threshold
-- [ ] run grounded-answer certification against a real OpenAI-compatible LLM
-- [ ] merge the reviewed calibration candidate
-- [ ] deploy to the real HTTPS target and pass production smoke
-- [ ] publish/tag `v1.0.0`
-
-For the detailed history and exact status, start at [`docs/project-history/README.md`](docs/project-history/README.md).
+For the detailed release checklist see [`docs/release-checklist.md`](docs/release-checklist.md). For the historical engineering record see [`docs/project-history/`](docs/project-history/).
 
 ## License
 
