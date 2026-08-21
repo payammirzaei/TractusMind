@@ -1,4 +1,4 @@
-# Temporary diagnostic: rerun against the tree-sitter node snapshot fix.
+# Temporary diagnostic: rerun against the Python stdlib AST chunking fix.
 name: Embedding Native Smoke
 
 on:
