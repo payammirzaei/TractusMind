@@ -117,6 +117,33 @@ def test_python_chunking_materializes_complex_declarations_without_native_node_r
     assert [chunk.chunk_id for chunk in first] == [chunk.chunk_id for chunk in second]
 
 
+def test_java_chunking_is_native_crash_safe_and_preserves_line_provenance() -> None:
+    document = _document(
+        path="edc/ConnectorService.java",
+        content=(
+            "package org.eclipse.tractusx;\n\n"
+            "public class ConnectorService {\n"
+            "    public String createAsset(String assetId) {\n"
+            "        return assetId;\n"
+            "    }\n"
+            "}\n"
+        ),
+        content_type="code",
+        language="java",
+    )
+    chunker = SmartChunker(code_max_chars=80)
+
+    first = chunker.chunk(document)
+    second = chunker.chunk(document)
+
+    assert first
+    assert all(chunk.kind == ChunkKind.CODE_SYMBOL for chunk in first)
+    assert first[0].start_line == 1
+    assert first[-1].end_line == 7
+    assert "ConnectorService" in "\n".join(chunk.text for chunk in first)
+    assert [chunk.chunk_id for chunk in first] == [chunk.chunk_id for chunk in second]
+
+
 def test_yaml_chunking_uses_top_level_keys() -> None:
     document = _document(
         path="config/application.yml",
