@@ -2,7 +2,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-CURRENT_DATABASE_REVISION = "0003_oidc_rbac"
+CURRENT_DATABASE_REVISION = "0004_password_auth"
 
 
 class DatabaseSchemaError(RuntimeError):
