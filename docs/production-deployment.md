@@ -88,11 +88,21 @@ secrets/llm_api_key
 secrets/github_token
 ```
 
-Then restrict permissions:
+For regular Docker Compose, file-backed secrets are bind-mounted into the container. Compose cannot
+remap `uid`, `gid`, or `mode` for a secret whose source is a host file. TractusMind application
+containers intentionally run as non-root, so the secret files themselves must be readable by that
+container user. Keep the **parent directory owner-only** on the host and make the individual secret
+files read-only/readable:
 
 ```bash
-chmod 600 secrets/*
+chmod 700 secrets
+chmod 644 secrets/*
 ```
+
+This does not make the secrets generally accessible on the host: other host users cannot traverse
+the `0700` parent directory. Inside Docker, only services explicitly granted a given secret receive
+that bind mount. Do not relax the `secrets/` directory permission, and do not copy secret values into
+`.env.production` merely to avoid this filesystem requirement.
 
 The `secrets/` directory and `.env.production` are ignored by Git.
 
