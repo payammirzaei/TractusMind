@@ -1,10 +1,12 @@
 import argparse
 import asyncio
+import os
 
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import inspect
 
+from app.auth.store import AuthStore, UserRole
 from app.core.config import get_settings
 from app.db.schema import verify_database_revision
 from app.infra.postgres import create_postgres_engine
@@ -52,6 +54,16 @@ def _parser() -> argparse.ArgumentParser:
         "drift",
         help="Fail when ORM metadata differs from the migrated database schema",
     )
+
+    password_user = subparsers.add_parser(
+        "password-user",
+        help="Create or convert one local password identity using a password from the environment",
+    )
+    password_user.add_argument("--username", required=True)
+    password_user.add_argument("--display-name", required=True)
+    password_user.add_argument("--role", choices=[role.value for role in UserRole], default="user")
+    password_user.add_argument("--user-id")
+    password_user.add_argument("--password-env", default="TRACTUSMIND_PASSWORD")
     return parser
 
 
@@ -74,6 +86,26 @@ async def _table_names() -> set[str]:
     finally:
         await engine.dispose()
     return {str(name) for name in names}
+
+
+async def _password_user(args: argparse.Namespace) -> None:
+    password = os.environ.get(args.password_env)
+    if not password:
+        raise SystemExit(f"Password environment variable is missing: {args.password_env}")
+
+    engine = create_postgres_engine(get_settings())
+    try:
+        store = AuthStore(engine)
+        identity = await store.set_password_user(
+            username=args.username,
+            password=password,
+            display_name=args.display_name,
+            role=UserRole(args.role),
+            user_id=args.user_id,
+        )
+    finally:
+        await engine.dispose()
+    print(f"password identity ready: {identity.username} ({identity.user_id}) [{identity.role.value}]")
 
 
 def _bootstrap(config: Config) -> None:
@@ -116,6 +148,8 @@ def main() -> None:
         command.history(config, verbose=True)
     elif args.command == "drift":
         command.check(config)
+    elif args.command == "password-user":
+        asyncio.run(_password_user(args))
     else:
         asyncio.run(_check())
 
