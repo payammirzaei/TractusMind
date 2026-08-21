@@ -28,10 +28,19 @@ function verifySecurityHeaders(response, route) {
   assert(response.headers.get("cross-origin-opener-policy") === "same-origin", `${route} missing COOP`);
   assert(response.headers.get("cross-origin-resource-policy") === "same-origin", `${route} missing CORP`);
   assert(response.headers.get("x-powered-by") == null, `${route} exposes X-Powered-By`);
+
   const csp = response.headers.get("content-security-policy") ?? "";
   assert(csp.includes("default-src 'self'"), `${route} missing default-src CSP`);
   assert(csp.includes("frame-ancestors 'none'"), `${route} missing frame-ancestors CSP`);
   assert(csp.includes("connect-src 'self'"), `${route} missing connect-src CSP`);
+
+  const scriptPolicy = csp
+    .split(";")
+    .map((directive) => directive.trim())
+    .find((directive) => directive.startsWith("script-src ")) ?? "";
+  assert(scriptPolicy.includes("'strict-dynamic'"), `${route} missing strict-dynamic script policy`);
+  assert(/'nonce-[^']+'/.test(scriptPolicy), `${route} missing per-request script nonce`);
+  assert(!scriptPolicy.includes("'unsafe-inline'"), `${route} permits unsafe inline scripts`);
 }
 
 async function probeRoute(route) {
