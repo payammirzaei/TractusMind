@@ -2,20 +2,15 @@ name: Corpus Calibration
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - ".github/workflows/corpus-calibration.yml"
-      - "app/ingestion/**"
-      - "tests/test_content_fetcher.py"
 
 permissions:
   contents: read
 
 jobs:
   calibrate:
-    # Release-candidate measurement after crash-safe Python and Java chunking.
+    # Expensive release-candidate measurement. Run manually after focused regressions are green.
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 300
     services:
       postgres:
         image: postgres:17.10-alpine
