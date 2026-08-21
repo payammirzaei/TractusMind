@@ -171,11 +171,16 @@ async def test_hybrid_index_bounds_repository_sized_embedding_batches() -> None:
         seed.model_copy(update={"chunk_id": f"chunk-{index}"})
         for index in range(70)
     ]
+    progress: list[int] = []
 
-    indexed = await service.index(chunks)
+    async def record_progress(indexed_count: int) -> None:
+        progress.append(indexed_count)
+
+    indexed = await service.index(chunks, progress_callback=record_progress)
 
     assert indexed == 70
     assert store.ensure_calls == 1
     assert dense.batch_lengths == [32, 32, 6]
     assert sparse.batch_lengths == [32, 32, 6]
     assert store.upsert_lengths == [32, 32, 6]
+    assert progress == [32, 64, 70]
