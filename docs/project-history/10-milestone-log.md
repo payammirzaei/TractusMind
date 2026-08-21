@@ -1,243 +1,148 @@
 # 10 — Chronological Milestone Log
 
-This is a development-history summary, not a replacement for `git log`. It groups the important architectural milestones so future readers do not need to reconstruct the project from hundreds of individual edits.
+This is a development-history summary, not a replacement for `git log`. It groups the architectural milestones that materially changed TractusMind.
 
 ## Phase A — Source-grounded backend foundation
 
-The project began by establishing the backend primitives required for a trustworthy engineering copilot:
-
-- FastAPI application structure,
-- PostgreSQL state,
-- Qdrant vector storage,
-- GitHub source discovery/fetching,
-- curated source registry,
-- document normalization,
-- smart chunking,
-- dense embedding/indexing,
-- retrieval endpoints/CLI.
-
-The key early decision was that source repository/ref/snapshot provenance must survive from ingestion through answer citation.
+The project established FastAPI, PostgreSQL, Qdrant, GitHub source discovery/fetching, a curated source registry, document normalization, chunking, dense indexing, and retrieval. The early invariant was that repository/ref/snapshot provenance must survive all the way to answer citations.
 
 ## Phase B — Hybrid retrieval and evidence control
 
-The retrieval architecture was expanded with:
-
-- BM25-style sparse vectors,
-- hybrid dense+sparse search,
-- exact/debug retrieval lane,
-- RRF/candidate fusion,
-- cross-encoder reranking,
-- structured query routing,
-- source/ref/snapshot filters,
-- evidence thresholding and abstention.
-
-At this point the system became a controlled RAG pipeline rather than a plain semantic search wrapper.
+The retrieval path gained BM25 sparse vectors, hybrid dense+sparse search, exact/debug retrieval, RRF fusion, cross-encoder reranking, source/ref/snapshot filtering, evidence thresholding, and abstention.
 
 ## Phase C — Grounded answer and verification
 
-The generation path added:
+Generation added bounded grounded context, citation construction/validation, atomic claim verification, structured answer metadata, and the rule: **history is context, never evidence**.
 
-- bounded grounded context,
-- citation construction/validation,
-- claim verification,
-- answer/abstain behavior,
-- structured answer metadata for inspection.
+## Phase D — Stateful conversations and quality loop
 
-The invariant “history is context, never evidence” became a core rule.
-
-## Phase D — Stateful conversations and user quality loop
-
-The backend then gained:
-
-- owned conversations/messages,
-- API-key identities,
-- role hierarchy,
-- feedback persistence,
-- quality review objects,
-- operator/admin review actions,
-- evaluation and quality-gate tooling.
+The backend added owned conversations/messages, API-key identities, RBAC, feedback persistence, human quality review, regression promotion, and evaluation/quality-gate tooling.
 
 ## Phase E — Background operations and production backend
 
-Operational capabilities were added:
+Operational work added Redis, Dramatiq workers, scheduler, incremental synchronization, ingestion state, provider retries/circuit breaking, Prometheus/OpenTelemetry, Grafana/Alertmanager, production Compose, startup migrations, Docker secrets, and backup/restore procedures.
 
-- Redis,
-- Dramatiq workers,
-- scheduler,
-- incremental source synchronization,
-- ingestion run state,
-- provider retries/backoff/circuit breaking,
-- Prometheus/OpenTelemetry metrics,
-- Grafana/Alertmanager configuration,
-- production Compose topology,
-- migrations as startup gates,
-- Docker secret support,
-- backup/restore procedures.
+## Phase F — Enterprise authentication
 
-## Phase F — Authentication hardening and enterprise identity
+Authentication expanded from local API keys to external OIDC identities. The browser layer adopted Authorization Code + PKCE plus a Next.js BFF/session boundary so backend bearer credentials are not persisted in browser storage.
 
-Authentication evolved from local API keys into a two-path model:
+## Phase G — Mission Control
 
-- local API identities,
-- external OIDC identities.
-
-The browser layer later added Authorization Code + PKCE and a server-side session/BFF boundary so bearer credentials are not persisted in browser storage.
-
-## Phase G — Mission Control frontend
-
-The frontend was built out in large feature passes rather than isolated cosmetic edits.
-
-Major milestones included:
-
-- live backend readiness in the shell,
-- premium Copilot workbench,
-- citation/provenance inspector,
-- claim verification inspector,
-- processing rail,
-- Sources console,
-- Ops console,
-- Quality console,
-- Admin console,
-- global Ctrl/⌘K command launcher,
-- `/overview` Command Center,
-- responsive console visual system,
-- loading/404/error/global fail-safe surfaces,
-- live session revalidation,
-- SSO-first login when configured.
-
-Representative frontend development commits included work such as:
-
-- `feat(ui): surface live backend readiness`
-- `feat(ui): elevate copilot workbench interactions`
-- `feat(ui): turn control decks into interactive consoles`
-- `feat(ui): add global mission command launcher`
-- `feat(ui): add live mission command center`
-- `feat(ui): continuously revalidate live Mission Control sessions`
+Mission Control grew into a complete engineering console with live readiness, Copilot, evidence/claim inspection, Sources, Ops, Quality, Admin, global command launcher, Command Center, responsive states, live session revalidation, and SSO-first login when configured.
 
 ## Phase H — Frontend security and runtime CI
 
-The frontend workflow was expanded to test the production artifact, not only source code.
-
-Added/verified:
-
-- npm audit,
-- typecheck,
-- Next.js production build,
-- `next start` route smoke,
-- BFF/session smoke,
-- mock OIDC provider,
-- PKCE verifier/challenge validation,
-- disabled-SSO fail-closed smoke,
-- Docker runtime smoke,
-- browser security-header assertions,
-- development/production Compose validation.
-
-The production Next.js runtime was hardened and unnecessary package-manager tooling was removed from the final image after Trivy findings.
+The frontend workflow began testing the production artifact, not just source code: dependency audit, typecheck, production build, BFF/session smoke, mock OIDC/PKCE, disabled-SSO fail-closed behavior, Docker runtime smoke, browser security headers, and Compose validation.
 
 ## Phase I — Green CI milestone
 
-A temporary frontend/security diagnostic PR was used to obtain actionable GitHub Actions logs.
+**PR #1 — frontend/security green gate — merged**
 
-**PR #1 — `ci: validate frontend and security green gate`**
+Frontend/build and Security/Trivy reached green after root-cause dependency/runtime fixes.
 
-- status: merged,
-- purpose: expose and fix frontend/security workflow failures,
-- result: CI/test, Frontend/build and Security/Trivy reached green status on the verified candidate.
+## Phase J — Full-stack integration
 
-This completed the first formal release stage.
-
-## Phase J — Full-stack integration milestone
-
-A real Compose integration workflow was introduced and iterated through temporary diagnostic PRs.
-
-It exposed and helped fix:
-
-- loopback/container networking assumptions,
-- missing `.env` fixture behavior,
-- browser/internal origin mismatch behind reverse proxy.
-
-The final gate successfully exercised the real Mission Control → BFF → FastAPI → PostgreSQL/Redis/Qdrant path with auth/RBAC and background services.
-
-Temporary evidence PRs included #2, #3, #5 and #7. These were diagnostic and intentionally not merged as product changes.
+Temporary diagnostic PRs exposed networking, environment-fixture, and reverse-proxy origin/CSRF assumptions. The durable Full Stack Integration gate then exercised Mission Control → BFF → FastAPI → PostgreSQL/Redis/Qdrant with worker/scheduler and RBAC.
 
 ## Phase K — Self-contained quality infrastructure
 
-Quality validation was redesigned so GitHub Actions can create its own clean state:
+GitHub Actions gained isolated PostgreSQL/Qdrant state and built-in GitHub-token access for public Tractus-X sources. This made full-corpus measurement reproducible rather than dependent on a developer machine.
 
-- PostgreSQL service,
-- Qdrant service,
-- GitHub job token for public sources,
-- fresh schema/corpus per run.
+## Phase L — Native ingestion crash discovery
 
-**PR #8 — `ci: verify self-contained quality infrastructure`**
+The first real-corpus calibration attempt reached `tractusx-sdk` and exposed a native SIGSEGV in Python tree-sitter chunking.
 
-- status: closed, not merged,
-- purpose: prove the infrastructure assumptions,
-- result: quality infrastructure itself was validated.
+**PR #10 — embedding/native diagnostic — closed, not merged**
 
-A permanent corpus-calibration workflow was then added to `main`.
+Dense and sparse model initialization were isolated and passed, narrowing the fault away from embeddings.
 
-## Phase L — Full-corpus calibration and native crash discovery
+**PR #11 — crash-safe Python AST chunking — merged**
 
-**PR #9 — `ci: run full-corpus calibration candidate`**
+Python symbol chunking moved to the standard-library AST path. Java later moved to a deterministic crash-safe chunking path as well.
 
-- status at snapshot time: open,
-- purpose: execute all six sources and generate retrieval/threshold evidence.
+## Phase M — Hardened production runtime
 
-The first run successfully reached real source ingestion but crashed during `tractusx-sdk` with native exit 139.
+**PR #12 — production runtime gate — merged**
 
-## Phase M — Tractus-X SDK SIGSEGV root cause and fix
+The real hardened Compose topology was proven end to end: private data services, read-only application roots, dropped capabilities, Caddy HTTPS, trusted internal CA, real admin provisioning, Secure `__Host-` session behavior, cross-site mutation rejection, BFF/operator/admin paths, and teardown.
 
-**PR #10 — `ci: isolate embedding native crash`**
+## Phase N — Release engineering hardening
 
-- status: closed, not merged,
-- purpose: isolate dense vs sparse native embedding paths,
-- result: both simple dense and sparse paths passed; embedding initialization alone was not the culprit.
+**PR #13 — release preflight hardening — merged**
 
-The real SDK corpus was then traced through fetch/chunk/embed stages and the failure was narrowed to Python tree-sitter parsing.
+Added fail-closed release/tag preflight, backup/restore CI proof, release checklist/changelog support, provider preflight smoke, and guarded multi-architecture GHCR publication with SBOM/provenance.
 
-**PR #11 — `fix: use crash-safe Python AST chunking`**
+## Phase O — Mission Control premium polish
 
-- status: merged,
-- purpose: eliminate the native Python parser crash,
-- change: Python symbol chunking moved to stdlib AST; other supported languages retain appropriate tree-sitter paths,
-- validation: regression plus exact upstream `tractusx-sdk` corpus and normal CI/security/full-stack checks.
+**PR #14 — premium Mission Control polish — merged**
 
-This is the durable product fix for the corpus-ingestion SIGSEGV.
+The frontend visual system converged on a modern industrial mission-control language: graphite chassis, recessed evidence wells, tactile controls, status LEDs, technical typography, restrained animations, and consistent control-plane surfaces without fake telemetry.
 
-## Phase N — Hardened production runtime gate
+## Phase P — CPU-only production performance
 
-**PR #12 — `ci: prove hardened production runtime end to end`**
+**PR #15 — CPU retrieval performance gate — merged**
 
-- status at snapshot time: open,
-- purpose: boot and smoke the actual hardened production Compose topology,
-- target behavior: Docker secrets, authenticated Redis, private backend services, read-only app containers, Mission Control, Caddy HTTPS, Secure `__Host-` session cookies, CSRF rejection and production BFF/admin/operator behavior.
+A two-CPU evidence-first benchmark measured dense/sparse/reranker/combined local model compute and RSS. Only after measurement were fail-closed budgets pinned.
 
-This is current release-hardening work, not a historical diagnostic-only branch.
+Recorded repeat-gate evidence:
 
-## PR snapshot (2026-08-21)
+```text
+dense p95        51.4 ms   / budget 150 ms
+sparse p95        0.32 ms  / budget 10 ms
+reranker p95    944 ms     / budget 1650 ms
+combined p95    990 ms     / budget 1750 ms
+max RSS         893 MiB    / budget 1536 MiB
+```
 
-| PR | Purpose | Snapshot status | Product merge? |
+Grafana/Prometheus local-model p95 telemetry and sustained-regression alerts were added. The measured v1 query path does not require a GPU.
+
+## Phase Q — Railway production adaptation
+
+A Railway-specific runbook was added instead of pretending the self-hosted Caddy/Compose topology maps one-to-one onto Railway.
+
+The intended platform boundary is public Mission Control with a private BFF-to-FastAPI path and private PostgreSQL/Redis/Qdrant/worker/scheduler services.
+
+## Phase R — Real semantic-model corpus edge cases
+
+A later full-corpus attempt proved the earlier Python/Java fixes, then exposed two new real-data issues:
+
+1. legacy semantic-model text that was not strict UTF-8,
+2. Turtle prefix declarations that could make an earlier statement inherit a later prefix line and produce invalid `end_line < start_line` provenance.
+
+Durable fixes were added:
+
+- UTF-8 remains authoritative, with controlled CP1252 fallback for legacy text and fail-closed binary detection,
+- Turtle prefix context is now streaming/position-aware so line provenance remains valid,
+- regression tests cover both behaviors.
+
+The same attempt also showed that a clean serial six-source rebuild can exceed two hours. The full calibration workflow was therefore changed to **manual-only** with a larger timeout so normal PR work does not repeatedly consume multi-hour runners.
+
+**PR #9 — full-corpus ingestion/calibration hardening — merged**
+
+The PR was renamed/reframed before merge because the durable product value was ingestion hardening and manual release calibration, not a successfully completed threshold certification.
+
+## Current PR snapshot
+
+| PR | Purpose | Final status | Durable product merge? |
 | --- | --- | --- | --- |
 | #1 | Frontend/security green gate | merged | yes |
-| #2 | Full-stack diagnostic | closed | no |
-| #3 | Full-stack release-candidate diagnostic | closed | no |
-| #4 | Quality environment probe | closed | no |
-| #5 | Full-stack final diagnostic | closed | no |
-| #6 | Release-candidate diagnostic | open/stale | no; clean up |
-| #7 | Proxy-origin diagnostic | closed | no |
-| #8 | Quality infrastructure diagnostic | closed | no |
-| #9 | Corpus calibration measurement | open | evidence branch |
-| #10 | Native embedding diagnostic | closed | no |
+| #2/#3/#5/#7 | Full-stack diagnostics | closed | no |
+| #4/#8 | Quality environment diagnostics | closed | no |
+| #6 | stale release diagnostic | closed/stale historical | no |
+| #9 | Corpus ingestion + manual calibration hardening | merged | yes |
+| #10 | Native embedding/parser diagnostic | closed | no |
 | #11 | Crash-safe Python AST chunking | merged | yes |
-| #12 | Hardened production runtime gate | open | candidate after green verification |
+| #12 | Hardened production runtime gate | merged | yes |
+| #13 | Release preflight + backup/restore hardening | merged | yes |
+| #14 | Mission Control premium polish | merged | yes |
+| #15 | CPU-only performance gate | merged | yes |
 
-## Next historical milestone to record
+## Next milestones that still need real evidence
 
-The next entry should be created only when one of these is genuinely true:
-
-1. the six-source calibration finishes and the measured threshold is pinned;
-2. the hardened production runtime gate is merged green;
-3. real LLM answer certification passes;
-4. a live HTTPS deployment passes production smoke;
-5. `v1.0.0` is tagged.
+1. manual six-source calibration completes on the final release candidate,
+2. measured threshold is human-reviewed and pinned,
+3. real LLM grounded-answer certification passes,
+4. Railway deployment passes live HTTPS/session/BFF/security/latency smoke,
+5. `main` branch protection is enabled and stale diagnostic branches are deleted,
+6. release preflight passes on the exact candidate,
+7. `v1.0.0` is tagged and published.
