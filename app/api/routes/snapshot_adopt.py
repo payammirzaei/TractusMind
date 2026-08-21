@@ -27,6 +27,7 @@ class AdoptSnapshotRequest(BaseModel):
     files: list[AdoptedFile]
     chunk_count: int = Field(ge=0)
     indexed_count: int = Field(ge=0)
+    force_unlock: bool = False
 
 
 class AdoptSnapshotResponse(BaseModel):
@@ -53,6 +54,9 @@ async def adopt_snapshot(
     This endpoint does not fetch source content or create embeddings. It is intended
     for trusted bulk-indexing workers that already wrote the exact TractusMind vector
     payloads to Qdrant and need to reconcile Postgres source state afterwards.
+
+    ``force_unlock`` is an explicit ops-admin escape hatch for stale per-source Redis
+    locks left behind when a Railway worker is intentionally stopped mid-sync.
     """
 
     try:
@@ -90,7 +94,11 @@ async def adopt_snapshot(
             detail="Snapshot contains duplicate file paths",
         )
 
-    locked = bool(await request.app.state.redis.exists(f"tractusmind:source-sync:{source_id}"))
+    lock_key = f"tractusmind:source-sync:{source_id}"
+    locked = bool(await request.app.state.redis.exists(lock_key))
+    if locked and payload.force_unlock:
+        await request.app.state.redis.delete(lock_key)
+        locked = False
     if locked:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
