@@ -1,0 +1,16 @@
+# CPU-only release budgets measured on a Linux runner constrained to two CPUs.
+# Baseline evidence: CPU Performance run 32467484000, artifact 9441253213.
+# Budgets intentionally include headroom above the observed p95 to avoid tuning to runner noise.
+
+[workload]
+cpu_count = 2
+candidate_count = 20
+candidate_chars = 1200
+rerank_limit = 6
+
+[budget]
+dense_query_p95_ms = 150.0
+sparse_query_p95_ms = 10.0
+rerank_p95_ms = 1650.0
+combined_model_compute_p95_ms = 1750.0
+max_rss_mb = 1536.0
