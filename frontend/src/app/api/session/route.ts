@@ -69,21 +69,35 @@ export async function POST(request: Request) {
     return noStore(NextResponse.json({ detail: "Invalid JSON body" }, { status: 400 }));
   }
 
-  const token =
+  const username =
     typeof payload === "object" &&
     payload !== null &&
-    "token" in payload &&
-    typeof payload.token === "string"
-      ? payload.token.trim()
+    "username" in payload &&
+    typeof payload.username === "string"
+      ? payload.username.trim()
       : "";
-  if (!token || token.length > 8192) {
+  const password =
+    typeof payload === "object" &&
+    payload !== null &&
+    "password" in payload &&
+    typeof payload.password === "string"
+      ? payload.password
+      : "";
+
+  if (!username || username.length > 80 || !password || password.length > 1024) {
     return noStore(
-      NextResponse.json({ detail: "A valid bearer credential is required" }, { status: 422 }),
+      NextResponse.json({ detail: "Username and password are required" }, { status: 422 }),
     );
   }
 
   try {
-    const upstream = await identityFor(token);
+    const upstream = await fetch(`${API_URL}/v1/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ username, password }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+    });
     const body = await upstream.text();
     if (!upstream.ok) {
       return noStore(
@@ -94,15 +108,29 @@ export async function POST(request: Request) {
       );
     }
 
-    const response = noStore(
-      new NextResponse(body, {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
-    );
+    let authenticated: Record<string, unknown>;
+    try {
+      authenticated = JSON.parse(body) as Record<string, unknown>;
+    } catch {
+      return noStore(NextResponse.json({ detail: "Invalid authentication response" }, { status: 502 }));
+    }
+    const token = typeof authenticated.token === "string" ? authenticated.token : "";
+    if (!token || token.length > 4096) {
+      return noStore(NextResponse.json({ detail: "Invalid authentication response" }, { status: 502 }));
+    }
+
+    const expiresIn =
+      typeof authenticated.expires_in === "number" && authenticated.expires_in > 0
+        ? Math.min(authenticated.expires_in, SESSION_MAX_AGE_SECONDS)
+        : SESSION_MAX_AGE_SECONDS;
+    const { token: _token, expires_in: _expiresIn, ...identity } = authenticated;
+    void _token;
+    void _expiresIn;
+
+    const response = noStore(NextResponse.json(identity));
     response.cookies.set(SESSION_COOKIE_NAME, token, {
       ...SESSION_COOKIE_OPTIONS,
-      maxAge: SESSION_MAX_AGE_SECONDS,
+      maxAge: expiresIn,
     });
     return response;
   } catch {
