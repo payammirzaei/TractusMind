@@ -1,6 +1,7 @@
 import json
 import re
 
+import structlog
 from pydantic import ValidationError
 
 from app.conversations.history import ConversationTurn, format_history, retrieval_question
@@ -14,6 +15,7 @@ from app.retrieval.reranked import RerankedRetrievalService
 from app.routing.models import QueryRoute
 from app.routing.service import QueryRouter
 
+logger = structlog.get_logger()
 _CITATION_RE = re.compile(r"\[(S\d+)\]")
 _ABSTAIN_MESSAGE = (
     "I don't have enough grounded Tractus-X evidence to answer this reliably."
@@ -102,6 +104,7 @@ class GroundedAnswerService:
 
         if not context.blocks:
             ANSWERS.labels(intent=intent, outcome="abstained_no_evidence").inc()
+            logger.info("answer_abstained", reason="no_evidence", intent=intent)
             return self._abstain(normalized, evidence_count=0, route=route)
 
         with observe_stage("generation", intent):
@@ -113,6 +116,12 @@ class GroundedAnswerService:
 
         if not payload.grounded:
             ANSWERS.labels(intent=intent, outcome="abstained_model").inc()
+            logger.info(
+                "answer_abstained",
+                reason="model_declared_ungrounded",
+                intent=intent,
+                evidence_count=len(context.blocks),
+            )
             return GroundedAnswer(
                 question=normalized,
                 answer=payload.answer,
@@ -138,6 +147,16 @@ class GroundedAnswerService:
         ]
         if invalid_ids or declared_invalid or not cited_ids or declared_ids != inline_ids:
             ANSWERS.labels(intent=intent, outcome="abstained_citation_gate").inc()
+            logger.info(
+                "answer_abstained",
+                reason="citation_gate",
+                intent=intent,
+                evidence_count=len(context.blocks),
+                cited_ids=cited_ids,
+                declared_ids=payload.citation_ids,
+                invalid_ids=invalid_ids,
+                declared_invalid=declared_invalid,
+            )
             return self._abstain(
                 normalized,
                 evidence_count=len(context.blocks),
@@ -150,8 +169,25 @@ class GroundedAnswerService:
                 answer=payload.answer,
                 context=context,
             )
+        verification_metadata = verification.model_dump(mode="json")
+        record_trace_metadata("verification", verification_metadata)
         if not verification.passed:
             ANSWERS.labels(intent=intent, outcome="abstained_verification").inc()
+            logger.info(
+                "answer_verification_failed",
+                intent=intent,
+                evidence_count=len(context.blocks),
+                failure_reason=verification.failure_reason,
+                unsupported_claim_count=verification.unsupported_claim_count,
+                claims=[
+                    {
+                        "supported": claim.supported,
+                        "citation_ids": claim.citation_ids,
+                        "reason": claim.reason,
+                    }
+                    for claim in verification.claims
+                ],
+            )
             return self._abstain(
                 normalized,
                 evidence_count=len(context.blocks),
@@ -161,6 +197,13 @@ class GroundedAnswerService:
 
         ordered_ids = list(dict.fromkeys(cited_ids))
         ANSWERS.labels(intent=intent, outcome="grounded").inc()
+        logger.info(
+            "answer_grounded",
+            intent=intent,
+            evidence_count=len(context.blocks),
+            citation_ids=ordered_ids,
+            verified_claim_count=len(verification.claims),
+        )
         return GroundedAnswer(
             question=normalized,
             answer=payload.answer,
