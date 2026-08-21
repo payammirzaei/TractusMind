@@ -3,6 +3,7 @@ export type UserRole = "user" | "operator" | "admin";
 export interface Identity {
   user_id: string;
   display_name: string;
+  username?: string | null;
   role: UserRole;
   auth_type: string;
 }
@@ -155,6 +156,7 @@ export interface RegressionCase {
 export interface ManagedUser {
   user_id: string;
   display_name: string;
+  username?: string | null;
   api_key_prefix?: string | null;
   enabled: boolean;
   role: UserRole;
