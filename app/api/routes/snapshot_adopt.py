@@ -69,9 +69,13 @@ async def adopt_snapshot(
             detail="Source is disabled in the registry",
         )
     if payload.version_ref != source.ref:
+        detail = (
+            f"Snapshot ref {payload.version_ref!r} does not match "
+            f"configured ref {source.ref!r}"
+        )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Snapshot ref {payload.version_ref!r} does not match configured ref {source.ref!r}",
+            detail=detail,
         )
     if payload.indexed_count != payload.chunk_count:
         raise HTTPException(
