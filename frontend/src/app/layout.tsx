@@ -3,6 +3,7 @@ import "./globals.css";
 import "./console.css";
 import "./command-center.css";
 import "./responsive.css";
+import "./polish.css";
 
 export const metadata: Metadata = {
   title: "TractusMind Mission Control",
