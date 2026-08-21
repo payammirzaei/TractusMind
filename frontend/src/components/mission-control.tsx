@@ -63,7 +63,7 @@ const roleRank: Record<UserRole, number> = { user: 0, operator: 1, admin: 2 };
 
 const AUTH_ERRORS: Record<string, string> = {
   sso_not_configured: "Enterprise SSO is not configured for this Mission Control.",
-  sso_unavailable: "Enterprise SSO is temporarily unavailable. You can retry or use an API key.",
+  sso_unavailable: "Enterprise SSO is temporarily unavailable. You can retry or use your local account.",
   provider_rejected: "The identity provider did not complete sign-in.",
   invalid_sso_state: "The SSO transaction could not be verified. Start sign-in again.",
   token_exchange_failed: "The identity provider could not exchange the authorization code.",
@@ -72,7 +72,8 @@ const AUTH_ERRORS: Record<string, string> = {
 };
 
 function LoginConsole({ onReady, returnTo }: { onReady: (identity: Identity) => void; returnTo: string }) {
-  const [token, setToken] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);
   const [ssoEnabled, setSsoEnabled] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -94,18 +95,19 @@ function LoginConsole({ onReady, returnTo }: { onReady: (identity: Identity) => 
     return () => { cancelled = true; };
   }, []);
 
-  async function connect() {
-    if (!token.trim()) return;
+  async function signIn() {
+    if (!username.trim() || !password) return;
     setPending(true); setError(null);
     try {
       const response = await fetch("/api/session", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({ username, password }),
       });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.detail ?? "Credential rejected");
-      setToken(""); onReady(payload as Identity);
+      if (!response.ok) throw new Error(payload.detail ?? "Sign-in rejected");
+      setPassword("");
+      onReady(payload as Identity);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Authentication failed");
     } finally { setPending(false); }
@@ -122,24 +124,29 @@ function LoginConsole({ onReady, returnTo }: { onReady: (identity: Identity) => 
           </div>
           <Badge className="mb-5 border-emerald-300/15 text-emerald-300"><span className="tm-led"/> secure console</Badge>
           <h2 className="text-3xl font-semibold tracking-[-.035em]">Engineering intelligence,<br/><span className="text-slate-500">with the panels open.</span></h2>
-          <p className="mt-4 text-sm leading-6 text-slate-500">Enterprise identities and API keys converge on the same backend-validated, HttpOnly Mission Control session.</p>
+          <p className="mt-4 text-sm leading-6 text-slate-500">Local accounts and enterprise identities are validated by the backend. Browser credentials become an HttpOnly Mission Control session and never enter client storage.</p>
 
           {ssoEnabled && <div className="mt-8">
             <a href={`/api/oidc/login?return_to=${encodeURIComponent(returnTo || "/")}`} className="tm-control flex h-12 w-full items-center justify-center gap-3 rounded-xl border-cyan-300/15 text-sm font-semibold text-cyan-100 hover:border-cyan-300/30"><ShieldCheck className="size-4 text-cyan-300"/>Continue with Enterprise SSO<ArrowRight className="size-4 text-slate-600"/></a>
             <div className="mt-3 text-center text-[10px] leading-5 text-slate-600">Authorization Code + PKCE · backend role validation · no browser token storage</div>
-            <div className="my-6 flex items-center gap-3"><span className="h-px flex-1 bg-white/5"/><span className="tm-label">API key fallback</span><span className="h-px flex-1 bg-white/5"/></div>
+            <div className="my-6 flex items-center gap-3"><span className="h-px flex-1 bg-white/5"/><span className="tm-label">local account</span><span className="h-px flex-1 bg-white/5"/></div>
           </div>}
 
           <div className={ssoEnabled ? "" : "mt-8"}>
-            <label className="tm-label mb-2 block">Bearer credential</label>
+            <label className="tm-label mb-2 block">Username</label>
+            <div className="tm-well flex items-center gap-2 rounded-xl p-2">
+              <Users className="ml-2 size-4 text-slate-600"/>
+              <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="payam" autoComplete="username" className="min-w-0 flex-1 bg-transparent px-2 py-2 text-sm outline-none placeholder:text-slate-700"/>
+            </div>
+            <label className="tm-label mb-2 mt-4 block">Password</label>
             <div className="tm-well flex items-center gap-2 rounded-xl p-2">
               <KeyRound className="ml-2 size-4 text-slate-600"/>
-              <input type="password" value={token} onChange={(event) => setToken(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void connect(); }} placeholder="tm_... or access token" autoComplete="off" className="min-w-0 flex-1 bg-transparent px-2 py-2 text-sm outline-none placeholder:text-slate-700"/>
-              <Button variant="primary" onClick={() => void connect()} disabled={pending || !token.trim()}>{pending ? "Verifying…" : "Connect"}</Button>
+              <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void signIn(); }} placeholder="••••••••••••" autoComplete="current-password" className="min-w-0 flex-1 bg-transparent px-2 py-2 text-sm outline-none placeholder:text-slate-700"/>
             </div>
+            <Button variant="primary" className="mt-4 w-full" onClick={() => void signIn()} disabled={pending || !username.trim() || !password}>{pending ? "Signing in…" : "Sign in"}</Button>
             {error && <div className="mt-3 rounded-lg border border-red-300/15 bg-red-300/5 p-3 text-xs leading-5 text-red-200">{error}</div>}
           </div>
-          <div className="mt-8 flex items-center justify-between border-t border-white/5 pt-4 text-[10px] uppercase tracking-[.14em] text-slate-700"><span>{ssoEnabled ? "OIDC PKCE / API key" : "API key / bearer"}</span><span>RBAC aware</span><span>HttpOnly session</span></div>
+          <div className="mt-8 flex items-center justify-between border-t border-white/5 pt-4 text-[10px] uppercase tracking-[.14em] text-slate-700"><span>{ssoEnabled ? "OIDC PKCE / password" : "local password"}</span><span>RBAC aware</span><span>HttpOnly session</span></div>
         </div>
       </motion.div>
     </main>
