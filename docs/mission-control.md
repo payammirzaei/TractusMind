@@ -27,10 +27,13 @@ server-side. The BFF allows only the backend roots used by Mission Control: `/v1
 proxy requests reject cross-site browser requests, request bodies are capped at 1 MiB, redirects are
 not followed, and upstream calls have bounded timeouts.
 
-Next.js applies baseline browser security headers to the direct runtime. Production additionally uses
-a restrictive CSP. Caddy repeats the production edge policy and adds HSTS. The policy denies framing,
+Baseline browser security headers are configured in `next.config.ts`. HTML/document responses receive
+a per-request nonce CSP from `frontend/src/proxy.ts`; production script execution requires the nonce
+and `strict-dynamic` rather than `unsafe-inline`. Caddy preserves that application CSP and adds the
+edge-only HSTS policy while repeating the remaining defensive headers. The policy denies framing,
 objects, cross-origin application connections, browser camera/microphone/geolocation access, DNS
-prefetching, and referrer leakage. CI probes the built production runtime and asserts these headers.
+prefetching, and referrer leakage. CI probes the built production runtime and asserts the nonce CSP,
+`strict-dynamic`, framing policy, connection policy, and baseline security headers.
 
 ## Enterprise SSO
 
@@ -57,11 +60,16 @@ a session, so backend OIDC signature/audience/issuer/RBAC policy remains authori
 Configure the IdP client as Authorization Code + PKCE with no client secret. Frontend runtime values:
 
 ```text
+TRACTUSMIND_OIDC_ENABLED=false
 TRACTUSMIND_OIDC_ISSUER_URL
 TRACTUSMIND_OIDC_CLIENT_ID
 TRACTUSMIND_OIDC_SCOPES
 TRACTUSMIND_OIDC_REDIRECT_URI   # recommended explicitly in production
 ```
+
+Browser SSO is enabled only when the explicit enable flag is truthy and issuer/client ID are present.
+The Compose topology maps `TRACTUSMIND_OIDC_ENABLED` from the root `OIDC_ENABLED` value so frontend
+SSO cannot silently diverge from backend OIDC validation.
 
 Backend OIDC validation continues to use `OIDC_ENABLED`, `OIDC_ISSUER_URL`, `OIDC_AUDIENCE`, role
 claims, allowed algorithms, and configured operator/admin roles.
@@ -144,7 +152,7 @@ https://tractusmind.example.com/api/oidc/callback
 1. production dependency audit at HIGH severity,
 2. TypeScript typecheck,
 3. Next.js production build,
-4. production Next runtime route + browser-policy smoke,
+4. production Next runtime route + nonce-CSP/browser-policy smoke,
 5. BFF/session security integration smoke with a deterministic backend,
 6. OIDC Authorization Code + PKCE integration smoke with a deterministic IdP,
 7. runtime Docker image build,
@@ -156,6 +164,11 @@ The BFF gate checks secure cookie policy, session round-trip, backend allowlisti
 cross-site mutation rejection, read-only health access, and Command Center API contracts. The OIDC
 gate checks discovery, PKCE, state validation, code exchange, backend identity validation, and open
 redirect rejection.
+
+The hardened Production Runtime gate separately boots the real production Compose topology behind
+Caddy, verifies private service exposure/read-only roots, provisions an admin identity through the
+private API, performs authenticated HTTPS Mission Control smoke with certificate verification, and
+tears the stack down cleanly.
 
 The workflow pins checkout/setup-node actions to immutable commit SHAs and uses Node 24.19.0 LTS.
 The repository security workflow separately builds and scans both backend and Mission Control images.
