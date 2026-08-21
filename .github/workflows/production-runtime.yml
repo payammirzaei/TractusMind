@@ -122,20 +122,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          bundle='artifacts/production-runtime/caddy-ca-bundle.crt'
           for attempt in $(seq 1 30); do
             if $COMPOSE_CMD exec -T caddy \
-              test -f /data/caddy/pki/authorities/local/root.crt 2>/dev/null; then
-              $COMPOSE_CMD exec -T caddy \
-                cat /data/caddy/pki/authorities/local/root.crt \
-                > artifacts/production-runtime/caddy-root.crt
+              test -f /data/caddy/pki/authorities/local/root.crt 2>/dev/null \
+              && $COMPOSE_CMD exec -T caddy \
+              test -f /data/caddy/pki/authorities/local/intermediate.crt 2>/dev/null; then
+              {
+                $COMPOSE_CMD exec -T caddy \
+                  cat /data/caddy/pki/authorities/local/root.crt
+                $COMPOSE_CMD exec -T caddy \
+                  cat /data/caddy/pki/authorities/local/intermediate.crt
+              } > "$bundle"
               break
             fi
             sleep 2
           done
-          test -s artifacts/production-runtime/caddy-root.crt
+          test -s "$bundle"
           for attempt in $(seq 1 30); do
             if curl --fail --silent --show-error \
-              --cacert artifacts/production-runtime/caddy-root.crt \
+              --cacert "$bundle" \
               https://localhost/api/health >/dev/null; then
               exit 0
             fi
@@ -183,7 +189,7 @@ jobs:
         env:
           TRACTUSMIND_PRODUCTION_URL: https://localhost
           TRACTUSMIND_PRODUCTION_SMOKE_API_KEY: ${{ steps.credential.outputs.api_key }}
-          TRACTUSMIND_PRODUCTION_SMOKE_CA_FILE: artifacts/production-runtime/caddy-root.crt
+          TRACTUSMIND_PRODUCTION_SMOKE_CA_FILE: artifacts/production-runtime/caddy-ca-bundle.crt
         run: |
           set -euo pipefail
           python scripts/production_smoke.py
