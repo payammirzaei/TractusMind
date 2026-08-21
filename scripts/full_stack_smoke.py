@@ -2,14 +2,14 @@
 """Smoke the running TractusMind stack through both API and Mission Control BFF.
 
 The script intentionally uses only the Python standard library so it can run on a
-fresh CI runner. It expects the development Compose stack to be running with an
-OPS_ADMIN_KEY configured for bootstrap.
+fresh CI runner. It expects the development Compose stack to be running.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import time
 import urllib.error
@@ -17,7 +17,8 @@ import urllib.request
 
 API_URL = os.environ.get("SMOKE_API_URL", "http://127.0.0.1:8000").rstrip("/")
 UI_URL = os.environ.get("SMOKE_UI_URL", "http://127.0.0.1:3100").rstrip("/")
-ADMIN_KEY = os.environ.get("SMOKE_OPS_ADMIN_KEY", "integration-admin-key")
+USERNAME = os.environ.get("SMOKE_USERNAME", "ci-admin")
+PASSWORD = os.environ.get("SMOKE_PASSWORD", "integration-password-1234")
 TIMEOUT_SECONDS = int(os.environ.get("SMOKE_TIMEOUT_SECONDS", "180"))
 
 
@@ -77,6 +78,35 @@ def wait_ready() -> None:
     raise RuntimeError(f"API did not become ready within {TIMEOUT_SECONDS}s: {last_error}")
 
 
+def bootstrap_password_admin() -> None:
+    env = {**os.environ, "TRACTUSMIND_PASSWORD": PASSWORD}
+    subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            "docker-compose.yml",
+            "-f",
+            "docker-compose.ui.yml",
+            "exec",
+            "-T",
+            "-e",
+            "TRACTUSMIND_PASSWORD",
+            "api",
+            "tractusmind-db",
+            "password-user",
+            "--username",
+            USERNAME,
+            "--display-name",
+            "Full Stack CI Admin",
+            "--role",
+            "admin",
+        ],
+        check=True,
+        env=env,
+    )
+
+
 def main() -> int:
     print("[integration] waiting for Postgres + Redis + Qdrant readiness")
     wait_ready()
@@ -89,34 +119,33 @@ def main() -> int:
     _, backend_health, _ = request(f"{UI_URL}/api/backend/health/ready")
     assert_dependency_health(backend_health, surface="Mission Control BFF")
 
-    print("[integration] bootstrapping a real admin identity through FastAPI")
-    _, credential, _ = request(
-        f"{API_URL}/v1/ops/users",
-        method="POST",
-        payload={"display_name": "Full Stack CI Admin", "role": "admin"},
-        headers={"X-TractusMind-Admin-Key": ADMIN_KEY},
-    )
-    if not isinstance(credential, dict) or not isinstance(credential.get("api_key"), str):
-        raise RuntimeError(f"Admin bootstrap did not return an API key: {credential}")
-    api_key = credential["api_key"]
+    print("[integration] bootstrapping a real password admin through the application CLI")
+    bootstrap_password_admin()
 
     print("[integration] establishing the HttpOnly Mission Control session")
     _, identity, login_headers = request(
         f"{UI_URL}/api/session",
         method="POST",
-        payload={"token": api_key},
+        payload={"username": USERNAME, "password": PASSWORD},
         headers={"Origin": UI_URL, "Sec-Fetch-Site": "same-origin"},
     )
     set_cookie = login_headers.get("set-cookie", "")
     required_cookie_flags = ("__Host-tm_session=", "HttpOnly", "Secure")
     if not all(flag in set_cookie for flag in required_cookie_flags):
         raise RuntimeError(f"Production session cookie policy missing: {set_cookie}")
-    if not isinstance(identity, dict) or identity.get("role") != "admin":
+    if (
+        not isinstance(identity, dict)
+        or identity.get("role") != "admin"
+        or identity.get("auth_type") != "password"
+    ):
         raise RuntimeError(f"Unexpected authenticated identity: {identity}")
 
     # CI reaches the production Next runtime over HTTP, so a browser would intentionally
     # withhold the Secure cookie. Send it explicitly here to exercise server-side BFF logic.
-    cookie = {"Cookie": f"__Host-tm_session={api_key}"}
+    cookie_pair = set_cookie.split(";", 1)[0]
+    if not cookie_pair.startswith("__Host-tm_session="):
+        raise RuntimeError("Session cookie value was not returned by Mission Control")
+    cookie = {"Cookie": cookie_pair}
 
     print("[integration] exercising authenticated session + BFF against the real API")
     request(f"{UI_URL}/api/session", headers=cookie)
@@ -128,10 +157,14 @@ def main() -> int:
     _, created_user, _ = request(
         f"{UI_URL}/api/backend/v1/ops/users",
         method="POST",
-        payload={"display_name": "Full Stack CI User", "role": "user"},
+        payload={"display_name": "Full Stack CI Machine", "role": "user"},
         headers={**cookie, "Origin": UI_URL, "Sec-Fetch-Site": "same-origin"},
     )
-    if not isinstance(created_user, dict) or created_user.get("role") != "user":
+    if (
+        not isinstance(created_user, dict)
+        or created_user.get("role") != "user"
+        or created_user.get("auth_type") != "api_key"
+    ):
         raise RuntimeError(f"BFF admin mutation returned unexpected payload: {created_user}")
 
     print("[integration] proving cross-site mutation is rejected")
