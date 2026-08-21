@@ -30,6 +30,14 @@ def test_semantic_version_query_adds_release_source_without_hard_version_filter(
     assert route.ref is None
 
 
+def test_semantic_model_hyphen_query_routes_to_semantic_source() -> None:
+    route = QueryRouter().route("Which semantic-model files define the relevant aspect?")
+
+    assert route.intent is QueryIntent.SEMANTIC
+    assert route.source_ids == ["semantic-models", "tractusx-docs"]
+    assert "matched_semantic_models" in route.reasons
+
+
 def test_generic_asset_query_routes_across_sdk_and_edc() -> None:
     route = QueryRouter().route("How do I create an asset?")
 
