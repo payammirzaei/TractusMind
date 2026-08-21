@@ -105,7 +105,10 @@ async def _password_user(args: argparse.Namespace) -> None:
         )
     finally:
         await engine.dispose()
-    print(f"password identity ready: {identity.username} ({identity.user_id}) [{identity.role.value}]")
+    print(
+        f"password identity ready: {identity.username} "
+        f"({identity.user_id}) [{identity.role.value}]"
+    )
 
 
 def _bootstrap(config: Config) -> None:
