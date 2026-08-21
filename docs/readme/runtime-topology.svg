@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="500" viewBox="0 0 1200 500" role="img" aria-labelledby="title desc">
+  <title id="title">TractusMind production runtime topology</title>
+  <desc id="desc">Animated Railway topology showing public Mission Control and private API, worker, scheduler and data services.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#060b12"/><stop offset="1" stop-color="#0b1220"/></linearGradient>
+    <filter id="g"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <style>
+      .t{font-family:Inter,ui-sans-serif,system-ui,sans-serif;fill:#e7eef8}.m{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;fill:#7f8ca2}.b{fill:#0d1623;stroke:#27364a}.c{stroke:#22d3ee}.a{stroke:#f59e0b}.r{stroke:#fb7185}.l{fill:none;stroke:#26384e;stroke-width:2.5}.f{fill:none;stroke:#22d3ee;stroke-width:2.5;stroke-dasharray:8 10;animation:d 2s linear infinite}.fa{fill:none;stroke:#f59e0b;stroke-width:2.5;stroke-dasharray:8 10;animation:d 2.4s linear infinite}.p{animation:p 1.4s ease-in-out infinite}@keyframes d{to{stroke-dashoffset:-36}}@keyframes p{50%{opacity:.28}}
+    </style>
+  </defs>
+  <rect width="1200" height="500" rx="26" fill="url(#bg)"/>
+  <text x="52" y="54" class="t" font-size="25" font-weight="800">Production topology — thin public edge, private knowledge core</text>
+  <text x="52" y="80" class="m" font-size="10">THE BROWSER TALKS TO MISSION CONTROL. MISSION CONTROL TALKS TO FASTAPI THROUGH A CONTROLLED BFF. DATA SERVICES STAY PRIVATE.</text>
+
+  <g transform="translate(52 136)"><rect class="b c" width="180" height="94" rx="16"/><text x="18" y="31" class="t" font-size="14" font-weight="700">Browser</text><text x="18" y="56" class="m" font-size="9">HttpOnly session</text><text x="18" y="74" class="m" font-size="9">no bearer in localStorage</text></g>
+  <g transform="translate(298 120)"><rect class="b c" width="220" height="126" rx="18"/><text x="20" y="34" class="t" font-size="15" font-weight="700">Mission Control</text><text x="20" y="58" class="m" font-size="9">Next.js / React</text><text x="20" y="78" class="m" font-size="9">/api/session</text><text x="20" y="97" class="m" font-size="9">/api/backend/* BFF</text></g>
+  <g transform="translate(590 120)"><rect class="b a" width="210" height="126" rx="18"/><text x="20" y="34" class="t" font-size="15" font-weight="700">FastAPI core</text><text x="20" y="58" class="m" font-size="9">routing / retrieval</text><text x="20" y="78" class="m" font-size="9">grounding / verification</text><text x="20" y="97" class="m" font-size="9">ops / identity / quality</text></g>
+
+  <path class="f" d="M232 183H298M518 183H590"/>
+  <circle cx="265" cy="183" r="5" fill="#22d3ee" filter="url(#g)" class="p"/><circle cx="554" cy="183" r="5" fill="#22d3ee" filter="url(#g)" class="p"/>
+
+  <g transform="translate(870 102)"><rect class="b" width="140" height="70" rx="14"/><text x="16" y="28" class="t" font-size="12" font-weight="700">PostgreSQL</text><text x="16" y="49" class="m" font-size="8">state / identity</text></g>
+  <g transform="translate(870 190)"><rect class="b" width="140" height="70" rx="14"/><text x="16" y="28" class="t" font-size="12" font-weight="700">Redis</text><text x="16" y="49" class="m" font-size="8">queue / locks</text></g>
+  <g transform="translate(1028 146)"><rect class="b c" width="120" height="70" rx="14"/><text x="16" y="28" class="t" font-size="12" font-weight="700">Qdrant</text><text x="16" y="49" class="m" font-size="8">hybrid index</text></g>
+
+  <path class="f" d="M800 160H870M800 202H870M800 183H1028"/>
+
+  <g transform="translate(298 318)"><rect class="b" width="220" height="92" rx="16"/><text x="18" y="30" class="t" font-size="14" font-weight="700">Scheduler</text><text x="18" y="55" class="m" font-size="9">periodic source checks</text><text x="18" y="73" class="m" font-size="9">enqueue changed sources only</text></g>
+  <g transform="translate(590 318)"><rect class="b" width="210" height="92" rx="16"/><text x="18" y="30" class="t" font-size="14" font-weight="700">Worker</text><text x="18" y="55" class="m" font-size="9">incremental ingest</text><text x="18" y="73" class="m" font-size="9">snapshot-safe writes</text></g>
+  <g transform="translate(870 318)"><rect class="b a" width="278" height="92" rx="16"/><text x="18" y="30" class="t" font-size="14" font-weight="700">External LLM</text><text x="18" y="55" class="m" font-size="9">generation + claim verification</text><text x="18" y="73" class="m" font-size="9">receives selected evidence, not the corpus</text></g>
+  <path class="fa" d="M518 364H590M800 364H870"/>
+
+  <g transform="translate(52 314)"><rect width="180" height="96" rx="16" fill="#09111b" stroke="#1d2a3a"/><text x="18" y="29" class="t" font-size="12" font-weight="700">Trust boundary</text><text x="18" y="53" class="m" font-size="8">PUBLIC</text><text x="18" y="73" class="m" font-size="8">Browser + Mission Control</text></g>
+  <text x="52" y="460" class="m" font-size="10">STEADY STATE: scheduler detects change → worker indexes delta → source snapshot advances → query path immediately sees the new version</text>
+</svg>
