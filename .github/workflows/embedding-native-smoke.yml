@@ -1,4 +1,4 @@
-# Temporary diagnostic: rerun against the Python stdlib AST chunking fix.
+# Temporary diagnostic: prove the exact SDK crash path is gone.
 name: Embedding Native Smoke
 
 on:
@@ -68,9 +68,9 @@ jobs:
           asyncio.run(main())
           PY
 
-  sdk-stages:
+  sdk-chunking:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 20
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -81,7 +81,7 @@ jobs:
           cache: pip
       - name: Install
         run: python -m pip install -e ".[dev]"
-      - name: Trace tractusx-sdk fetch, chunk and embedding stages
+      - name: Chunk every tractusx-sdk document including the former crash file
         shell: bash
         run: |
           set -euo pipefail
@@ -90,11 +90,11 @@ jobs:
 
           from app.chunking import SmartChunker
           from app.core.config import get_settings
-          from app.embeddings.service import DenseEmbeddingService
-          from app.embeddings.sparse import SparseEmbeddingService
-          from app.embeddings.text import build_embedding_text, build_sparse_text
           from app.ingestion.pipeline import SourceIngestionPipeline
           from app.ingestion.registry import get_source
+
+          TARGET = "examples/industry/notification/send_notification.py"
+          EXPECTED = {"main", "send_with_manual_endpoint", "discover_and_inspect"}
 
           async def main():
               settings = get_settings()
@@ -108,64 +108,23 @@ jobs:
                   circuit_failure_threshold=settings.provider_circuit_failure_threshold,
                   circuit_cooldown_seconds=settings.provider_circuit_cooldown_seconds,
               ) as pipeline:
-                  print("stage=fetch start", flush=True)
                   manifest, documents = await pipeline.fetch(source)
-                  print(
-                      f"stage=fetch pass files={len(manifest.files)} documents={len(documents)}",
-                      flush=True,
-                  )
 
+              assert len(manifest.files) == len(documents)
               chunker = SmartChunker()
-              chunks = []
-              for index, document in enumerate(documents, start=1):
-                  print(
-                      f"stage=chunk before index={index} path={document.path} "
-                      f"language={document.language} type={document.content_type}",
-                      flush=True,
-                  )
+              chunk_count = 0
+              target_symbols = set()
+              for document in documents:
                   produced = chunker.chunk(document)
-                  chunks.extend(produced)
-                  print(
-                      f"stage=chunk after index={index} produced={len(produced)} total={len(chunks)}",
-                      flush=True,
-                  )
-              print(f"stage=chunk pass chunks={len(chunks)}", flush=True)
+                  chunk_count += len(produced)
+                  if document.path == TARGET:
+                      target_symbols = {chunk.symbol for chunk in produced if chunk.symbol}
 
-              dense = DenseEmbeddingService(
-                  settings.embedding_model,
-                  batch_size=settings.embedding_batch_size,
+              assert EXPECTED <= target_symbols, (EXPECTED, target_symbols)
+              print(
+                  f"sdk-chunk-pass files={len(documents)} chunks={chunk_count} "
+                  f"target_symbols={sorted(target_symbols)}"
               )
-              for start in range(0, len(chunks), settings.embedding_batch_size):
-                  batch = chunks[start : start + settings.embedding_batch_size]
-                  print(
-                      f"stage=dense before start={start} size={len(batch)} "
-                      f"first={batch[0].path if batch else '-'}",
-                      flush=True,
-                  )
-                  vectors = await dense.embed_documents(
-                      [build_embedding_text(chunk) for chunk in batch]
-                  )
-                  assert len(vectors) == len(batch)
-                  print(f"stage=dense after start={start}", flush=True)
-              print("stage=dense pass", flush=True)
-
-              sparse = SparseEmbeddingService(
-                  settings.sparse_embedding_model,
-                  batch_size=settings.sparse_embedding_batch_size,
-              )
-              for start in range(0, len(chunks), settings.sparse_embedding_batch_size):
-                  batch = chunks[start : start + settings.sparse_embedding_batch_size]
-                  print(
-                      f"stage=sparse before start={start} size={len(batch)} "
-                      f"first={batch[0].path if batch else '-'}",
-                      flush=True,
-                  )
-                  vectors = await sparse.embed_documents(
-                      [build_sparse_text(chunk) for chunk in batch]
-                  )
-                  assert len(vectors) == len(batch)
-                  print(f"stage=sparse after start={start}", flush=True)
-              print("stage=sparse pass", flush=True)
 
           asyncio.run(main())
           PY
