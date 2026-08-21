@@ -16,14 +16,24 @@ class DenseEmbeddingService:
         model_name: str,
         *,
         batch_size: int = 32,
+        threads: int = 2,
     ) -> None:
+        if threads < 1:
+            raise ValueError("threads must be greater than zero")
         self.model_name = model_name
         self.batch_size = batch_size
+        self.threads = threads
         self._warmed = False
 
     @cached_property
     def model(self) -> TextEmbedding:
-        return TextEmbedding(model_name=self.model_name, lazy_load=True)
+        # Railway workers are CPU-constrained. Leaving ONNX Runtime at its default
+        # thread count can oversubscribe the container heavily during first indexing.
+        return TextEmbedding(
+            model_name=self.model_name,
+            lazy_load=True,
+            threads=self.threads,
+        )
 
     @cached_property
     def dimension(self) -> int:

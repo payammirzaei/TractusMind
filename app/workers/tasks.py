@@ -22,10 +22,23 @@ def sync_source_task(source_id: str) -> dict[str, object]:
     WORKER_JOBS_IN_PROGRESS.inc()
     try:
         result = asyncio.run(run_source_sync(source_id))
-        WORKER_JOBS.labels(status=str(result.get("status", "unknown"))).inc()
+        status = str(result.get("status", "unknown"))
+        WORKER_JOBS.labels(status=status).inc()
+        logger.info(
+            "source_sync_task_completed",
+            source_id=source_id,
+            status=status,
+            indexed_count=result.get("indexed_count"),
+            chunk_count=result.get("chunk_count"),
+        )
         return result
-    except Exception:
+    except Exception as exc:
         WORKER_JOBS.labels(status="failed").inc()
+        logger.exception(
+            "source_sync_failed",
+            source_id=source_id,
+            error_type=type(exc).__name__,
+        )
         raise
     finally:
         WORKER_JOBS_IN_PROGRESS.dec()

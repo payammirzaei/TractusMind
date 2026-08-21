@@ -1,5 +1,8 @@
+import pytest
+
 from app.chunking.models import ChunkKind, KnowledgeChunk
 from app.embeddings.text import build_embedding_text, build_sparse_text
+from app.retrieval.hybrid import HybridRetrievalService
 from app.retrieval.qdrant_store import QdrantKnowledgeStore, model_scoped_collection_name
 
 
@@ -100,3 +103,79 @@ def test_qdrant_collection_is_isolated_by_retrieval_models() -> None:
         "BAAI/bge-small-en-v1.5",
         "Qdrant/bm25",
     )
+
+
+class _FakeDenseEmbedder:
+    model_name = "dense-test"
+    batch_size = 32
+    dimension = 2
+
+    def __init__(self) -> None:
+        self.batch_lengths: list[int] = []
+
+    async def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        self.batch_lengths.append(len(texts))
+        return [[0.1, 0.2] for _ in texts]
+
+
+class _FakeSparseEmbedder:
+    model_name = "sparse-test"
+    batch_size = 32
+
+    def __init__(self) -> None:
+        self.batch_lengths: list[int] = []
+
+    async def embed_documents(self, texts: list[str]) -> list[object]:
+        self.batch_lengths.append(len(texts))
+        return [object() for _ in texts]
+
+
+class _FakeStore:
+    def __init__(self) -> None:
+        self.upsert_lengths: list[int] = []
+        self.ensure_calls = 0
+
+    async def ensure_collection(self, dimension: int, *, hybrid: bool) -> None:
+        assert dimension == 2
+        assert hybrid is True
+        self.ensure_calls += 1
+
+    async def upsert_chunks(
+        self,
+        chunks: list[KnowledgeChunk],
+        dense_vectors: list[list[float]],
+        *,
+        sparse_vectors: list[object],
+        embedding_model: str,
+        sparse_model: str,
+    ) -> int:
+        assert len(chunks) == len(dense_vectors) == len(sparse_vectors)
+        assert embedding_model == "dense-test"
+        assert sparse_model == "sparse-test"
+        self.upsert_lengths.append(len(chunks))
+        return len(chunks)
+
+
+@pytest.mark.asyncio
+async def test_hybrid_index_bounds_repository_sized_embedding_batches() -> None:
+    dense = _FakeDenseEmbedder()
+    sparse = _FakeSparseEmbedder()
+    store = _FakeStore()
+    service = object.__new__(HybridRetrievalService)
+    service.dense_embedder = dense
+    service.sparse_embedder = sparse
+    service.store = store
+
+    seed = _chunk()
+    chunks = [
+        seed.model_copy(update={"chunk_id": f"chunk-{index}"})
+        for index in range(70)
+    ]
+
+    indexed = await service.index(chunks)
+
+    assert indexed == 70
+    assert store.ensure_calls == 1
+    assert dense.batch_lengths == [32, 32, 6]
+    assert sparse.batch_lengths == [32, 32, 6]
+    assert store.upsert_lengths == [32, 32, 6]

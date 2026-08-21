@@ -1,5 +1,7 @@
 from collections.abc import Sequence
+from math import ceil
 
+import structlog
 from qdrant_client import AsyncQdrantClient
 
 from app.chunking.models import KnowledgeChunk
@@ -10,6 +12,8 @@ from app.retrieval.models import RetrievalHit
 from app.retrieval.qdrant_store import QdrantKnowledgeStore, model_scoped_collection_name
 from app.routing.filters import build_route_filter
 from app.routing.models import QueryRoute
+
+logger = structlog.get_logger()
 
 
 class HybridRetrievalService:
@@ -45,17 +49,66 @@ class HybridRetrievalService:
             raise ValueError("Stale-version cleanup requires chunks from one source and one commit")
 
         await self.store.ensure_collection(self.dense_embedder.dimension, hybrid=True)
-        dense_texts = [build_embedding_text(chunk) for chunk in chunks]
-        sparse_texts = [build_sparse_text(chunk) for chunk in chunks]
-        dense_vectors = await self.dense_embedder.embed_documents(dense_texts)
-        sparse_vectors = await self.sparse_embedder.embed_documents(sparse_texts)
-        indexed = await self.store.upsert_chunks(
-            chunks,
-            dense_vectors,
-            sparse_vectors=sparse_vectors,
-            embedding_model=self.dense_embedder.model_name,
-            sparse_model=self.sparse_embedder.model_name,
+
+        # Keep the source-level sync incremental, but bound embedding/upsert memory and
+        # make progress visible. FastEmbed has its own internal batching, however passing
+        # a whole repository worth of chunks in one logical call still retains all input
+        # texts/vectors until the call completes and makes a stalled model opaque.
+        index_batch_size = max(
+            1,
+            min(self.dense_embedder.batch_size, self.sparse_embedder.batch_size),
         )
+        batch_count = ceil(len(chunks) / index_batch_size)
+        indexed = 0
+
+        for batch_index, offset in enumerate(
+            range(0, len(chunks), index_batch_size),
+            start=1,
+        ):
+            batch = list(chunks[offset : offset + index_batch_size])
+            logger.info(
+                "index_batch_started",
+                batch_index=batch_index,
+                batch_count=batch_count,
+                batch_chunks=len(batch),
+                total_chunks=len(chunks),
+                source_ids=sorted({chunk.source_id for chunk in batch}),
+            )
+
+            dense_texts = [build_embedding_text(chunk) for chunk in batch]
+            dense_vectors = await self.dense_embedder.embed_documents(dense_texts)
+            logger.info(
+                "index_dense_batch_succeeded",
+                batch_index=batch_index,
+                batch_count=batch_count,
+                vector_count=len(dense_vectors),
+            )
+
+            sparse_texts = [build_sparse_text(chunk) for chunk in batch]
+            sparse_vectors = await self.sparse_embedder.embed_documents(sparse_texts)
+            logger.info(
+                "index_sparse_batch_succeeded",
+                batch_index=batch_index,
+                batch_count=batch_count,
+                vector_count=len(sparse_vectors),
+            )
+
+            batch_indexed = await self.store.upsert_chunks(
+                batch,
+                dense_vectors,
+                sparse_vectors=sparse_vectors,
+                embedding_model=self.dense_embedder.model_name,
+                sparse_model=self.sparse_embedder.model_name,
+            )
+            indexed += batch_indexed
+            logger.info(
+                "index_batch_succeeded",
+                batch_index=batch_index,
+                batch_count=batch_count,
+                indexed=batch_indexed,
+                indexed_total=indexed,
+                total_chunks=len(chunks),
+            )
 
         if remove_stale_source_versions:
             await self.store.remove_stale_source_versions(

@@ -1,11 +1,15 @@
 from dataclasses import dataclass
 
+import structlog
+
 from app.chunking import SmartChunker
 from app.ingestion.incremental import IncrementalPlan, build_incremental_plan
 from app.ingestion.models import SourceDefinition
 from app.ingestion.pipeline import SourceIngestionPipeline
 from app.retrieval.hybrid import HybridRetrievalService
 from app.state.store import SourceStateStore
+
+logger = structlog.get_logger()
 
 
 @dataclass(frozen=True)
@@ -48,10 +52,53 @@ class IncrementalSourceSync:
         plan = build_incremental_plan(manifest, previous_files)
         run_id = await self.state.start_run(manifest)
 
+        logger.info(
+            "ingestion_plan_ready",
+            run_id=run_id,
+            source_id=manifest.source_id,
+            discovered_count=len(manifest.files),
+            added_count=len(plan.added),
+            modified_count=len(plan.modified),
+            deleted_count=len(plan.deleted_paths),
+            unchanged_count=len(plan.unchanged),
+        )
+
         try:
+            logger.info(
+                "ingestion_fetch_started",
+                run_id=run_id,
+                source_id=manifest.source_id,
+                file_count=len(plan.changed_files),
+            )
             documents = await self.pipeline.fetch_files(manifest, plan.changed_files)
+            logger.info(
+                "ingestion_fetch_succeeded",
+                run_id=run_id,
+                source_id=manifest.source_id,
+                document_count=len(documents),
+            )
+
             chunks = self.chunker.chunk_many(documents)
+            logger.info(
+                "ingestion_chunking_succeeded",
+                run_id=run_id,
+                source_id=manifest.source_id,
+                chunk_count=len(chunks),
+            )
+
+            logger.info(
+                "ingestion_index_started",
+                run_id=run_id,
+                source_id=manifest.source_id,
+                chunk_count=len(chunks),
+            )
             indexed = await self.retrieval.index(chunks) if chunks else 0
+            logger.info(
+                "ingestion_index_succeeded",
+                run_id=run_id,
+                source_id=manifest.source_id,
+                indexed_count=indexed,
+            )
 
             await self._apply_qdrant_snapshot(
                 manifest_source_id=manifest.source_id,
@@ -77,7 +124,19 @@ class IncrementalSourceSync:
                 indexed_count=indexed,
                 previous_files=previous_files,
             )
+            logger.info(
+                "ingestion_run_completed",
+                run_id=run_id,
+                source_id=manifest.source_id,
+                indexed_count=indexed,
+            )
         except Exception as exc:
+            logger.exception(
+                "ingestion_run_failed",
+                run_id=run_id,
+                source_id=manifest.source_id,
+                error_type=type(exc).__name__,
+            )
             await self.state.fail_run(run_id, exc)
             raise
 
