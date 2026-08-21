@@ -26,9 +26,28 @@ _LANGUAGE_BY_SUFFIX = {
     ".toml": "toml",
 }
 
+_LEGACY_TEXT_ENCODINGS = ("cp1252",)
+
 
 def language_for_path(path: str) -> str | None:
     return _LANGUAGE_BY_SUFFIX.get(PurePosixPath(path).suffix.lower())
+
+
+def _decode_source_text(raw_bytes: bytes) -> str:
+    try:
+        return raw_bytes.decode("utf-8")
+    except UnicodeDecodeError as utf8_error:
+        # A small number of historical Tractus-X text assets predate UTF-8
+        # normalization. Keep UTF-8 authoritative, reject binary-looking blobs,
+        # and permit only a deterministic Western legacy fallback.
+        if b"\x00" in raw_bytes:
+            raise utf8_error
+        for encoding in _LEGACY_TEXT_ENCODINGS:
+            try:
+                return raw_bytes.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+        raise utf8_error
 
 
 def _document_id(repository: str, commit_sha: str, path: str) -> str:
@@ -75,10 +94,16 @@ class GitHubContentFetcher:
 
         try:
             raw_bytes = base64.b64decode(str(payload["content"]), validate=False)
-            content = raw_bytes.decode("utf-8")
-        except (KeyError, ValueError, UnicodeDecodeError) as exc:
+        except (KeyError, ValueError) as exc:
             raise GitHubSourceError(
-                f"Could not decode UTF-8 source: {manifest.repository}:{source_file.path}"
+                f"Could not decode GitHub blob: {manifest.repository}:{source_file.path}"
+            ) from exc
+
+        try:
+            content = _decode_source_text(raw_bytes)
+        except UnicodeDecodeError as exc:
+            raise GitHubSourceError(
+                f"Could not decode text source: {manifest.repository}:{source_file.path}"
             ) from exc
 
         content_sha256 = hashlib.sha256(raw_bytes).hexdigest()

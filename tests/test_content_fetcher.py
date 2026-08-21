@@ -3,6 +3,7 @@ import base64
 import pytest
 
 from app.ingestion.content import GitHubContentFetcher, language_for_path
+from app.ingestion.github_client import GitHubSourceError
 from app.ingestion.models import SourceFile, SourceManifest
 
 
@@ -19,9 +20,8 @@ class FakeGitHubClient:
         }
 
 
-@pytest.mark.asyncio
-async def test_fetch_document_is_pinned_and_traceable() -> None:
-    manifest = SourceManifest(
+def _manifest() -> SourceManifest:
+    return SourceManifest(
         source_id="tractusx-sdk",
         repository="eclipse-tractusx/tractusx-sdk",
         component="sdk",
@@ -30,6 +30,11 @@ async def test_fetch_document_is_pinned_and_traceable() -> None:
         archived=False,
         files=[],
     )
+
+
+@pytest.mark.asyncio
+async def test_fetch_document_is_pinned_and_traceable() -> None:
+    manifest = _manifest()
     source_file = SourceFile(
         path="examples/demo.py",
         sha="blob456",
@@ -53,6 +58,46 @@ async def test_fetch_document_is_pinned_and_traceable() -> None:
     assert fake_client.requested_paths == [
         "/repos/eclipse-tractusx/tractusx-sdk/git/blobs/blob456"
     ]
+
+
+@pytest.mark.asyncio
+async def test_fetch_document_accepts_cp1252_legacy_text() -> None:
+    manifest = _manifest().model_copy(
+        update={
+            "source_id": "semantic-models",
+            "repository": "eclipse-tractusx/sldt-semantic-models",
+            "component": "semantic-models",
+        }
+    )
+    source_file = SourceFile(
+        path="io.catenax.mandatory_dismantling/1.0.0/MandatoryDismantling.ttl",
+        sha="legacy-blob",
+        size=64,
+        content_type="structured",
+    )
+    raw = '@prefix ex: <urn:example:> .\r\nex:item ex:label "Größe"@de .\r\n'.encode("cp1252")
+    fetcher = GitHubContentFetcher(client=FakeGitHubClient(raw))
+
+    document = await fetcher.fetch_document(manifest, source_file)
+
+    assert document.language == "turtle"
+    assert '"Größe"@de' in document.content
+    assert "\r" not in document.content
+    assert document.content_sha256
+
+
+@pytest.mark.asyncio
+async def test_fetch_document_rejects_binary_looking_legacy_blob() -> None:
+    source_file = SourceFile(
+        path="model.ttl",
+        sha="binary-blob",
+        size=4,
+        content_type="structured",
+    )
+    fetcher = GitHubContentFetcher(client=FakeGitHubClient(b"\xff\x00\xfe\x01"))
+
+    with pytest.raises(GitHubSourceError, match="Could not decode text source"):
+        await fetcher.fetch_document(_manifest(), source_file)
 
 
 def test_language_detection() -> None:

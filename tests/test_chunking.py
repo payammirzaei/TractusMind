@@ -117,6 +117,33 @@ def test_python_chunking_materializes_complex_declarations_without_native_node_r
     assert [chunk.chunk_id for chunk in first] == [chunk.chunk_id for chunk in second]
 
 
+def test_java_chunking_is_native_crash_safe_and_preserves_line_provenance() -> None:
+    document = _document(
+        path="edc/ConnectorService.java",
+        content=(
+            "package org.eclipse.tractusx;\n\n"
+            "public class ConnectorService {\n"
+            "    public String createAsset(String assetId) {\n"
+            "        return assetId;\n"
+            "    }\n"
+            "}\n"
+        ),
+        content_type="code",
+        language="java",
+    )
+    chunker = SmartChunker(code_max_chars=80)
+
+    first = chunker.chunk(document)
+    second = chunker.chunk(document)
+
+    assert first
+    assert all(chunk.kind == ChunkKind.CODE_SYMBOL for chunk in first)
+    assert first[0].start_line == 1
+    assert first[-1].end_line == 7
+    assert "ConnectorService" in "\n".join(chunk.text for chunk in first)
+    assert [chunk.chunk_id for chunk in first] == [chunk.chunk_id for chunk in second]
+
+
 def test_yaml_chunking_uses_top_level_keys() -> None:
     document = _document(
         path="config/application.yml",
@@ -137,6 +164,30 @@ def test_yaml_chunking_uses_top_level_keys() -> None:
     assert chunks[0].end_line == 2
     assert chunks[1].start_line == 3
     assert chunks[1].end_line == 4
+
+
+def test_turtle_chunking_scopes_prefixes_by_source_order() -> None:
+    document = _document(
+        path="semantic/model.ttl",
+        content=(
+            "<urn:first> <urn:predicate> <urn:object> .\n"
+            "@prefix ex: <https://example.org/> .\n"
+            "ex:second ex:predicate ex:object .\n"
+        ),
+        content_type="semantic_model",
+        language="turtle",
+    )
+
+    chunks = SmartChunker().chunk(document)
+
+    assert len(chunks) == 2
+    assert chunks[0].start_line == 1
+    assert chunks[0].end_line == 1
+    assert "@prefix" not in chunks[0].text
+    assert chunks[1].start_line == 2
+    assert chunks[1].end_line == 3
+    assert chunks[1].text.startswith("@prefix ex:")
+    assert all(chunk.end_line >= chunk.start_line for chunk in chunks)
 
 
 def test_chunk_ids_are_stable_for_same_document() -> None:
