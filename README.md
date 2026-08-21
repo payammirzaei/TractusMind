@@ -28,7 +28,7 @@ Navigation is RBAC-aware: `user < operator < admin`.
 
 - FastAPI grounded answer API
 - allowlisted, commit-pinned Tractus-X GitHub ingestion
-- structure-aware Markdown/code/YAML/Turtle chunking
+- structure-aware Markdown/code/YAML/Turtle chunking with crash-safe Python/Java paths
 - Qdrant dense + BM25 hybrid retrieval
 - exact debug retrieval lane + RRF fusion
 - cross-encoder reranking
@@ -111,6 +111,8 @@ The browser does **not** keep the bearer credential in localStorage. `/api/sessi
 
 Production uses a Secure `__Host-` session cookie. Rejected/revoked backend sessions are expired immediately, and Mission Control revalidates active sessions periodically and on browser focus.
 
+HTML responses use a per-request nonce CSP with `strict-dynamic`; production does not rely on `unsafe-inline` for script execution. Caddy preserves the application CSP and adds the public-edge HSTS policy.
+
 Browser SSO uses **Authorization Code + PKCE** as a public client. No frontend client secret is required. SSO fails closed unless explicitly enabled and fully configured.
 
 See [`docs/mission-control.md`](docs/mission-control.md).
@@ -185,11 +187,13 @@ docker compose \
 
 PostgreSQL, Redis, and Qdrant remain private. Grafana/Prometheus/Alertmanager remain operator-only loopback services.
 
+The hardened Production Runtime gate now proves the composed topology end to end in CI: private service exposure, read-only application roots, Caddy HTTPS, certificate verification, real admin provisioning, Mission Control session/BFF/RBAC behavior, and clean teardown.
+
 See [`docs/production-deployment.md`](docs/production-deployment.md) and [`docs/mission-control.md`](docs/mission-control.md).
 
 ## Validation gates
 
-The repository now uses multiple independent release gates.
+The repository uses multiple independent release gates.
 
 Backend/general CI validates linting, migrations/schema behavior, PostgreSQL-backed tests and configuration correctness.
 
@@ -206,6 +210,8 @@ Security CI scans the repository plus backend and Mission Control container imag
 
 A real **Full Stack Integration** gate boots PostgreSQL, Redis, Qdrant, migrations, FastAPI, worker, scheduler and Mission Control together, then exercises readiness, admin bootstrap, HttpOnly session/BFF/RBAC, protected mutations and logout.
 
+A separate **Production Runtime** gate proves the hardened HTTPS deployment topology rather than only validating Compose syntax.
+
 ## Current milestone
 
 **V23 — Mission Control + v1 production hardening**
@@ -221,20 +227,22 @@ Implemented and verified:
 - [x] HttpOnly BFF authentication boundary
 - [x] enterprise browser SSO with Authorization Code + PKCE
 - [x] role-aware Sources/Ops/Quality/Admin consoles
+- [x] per-request nonce CSP + browser-policy smoke
 - [x] frontend production runtime smoke suite
 - [x] Trivy security gates
 - [x] real full-stack Docker integration gate
 - [x] hardened production Compose architecture
+- [x] hardened production runtime HTTPS gate
 - [x] Tractus-X SDK Python-ingestion SIGSEGV root cause and AST-based fix
+- [x] crash-safe Java ingestion path for EDC/Digital Twin corpus sources
 
 Remaining certification/release work:
 
-- [ ] rerun complete six-source corpus calibration after the ingestion fix
+- [ ] complete the six-source corpus calibration run
 - [ ] review and pin the measured evidence threshold
 - [ ] run grounded-answer certification against a real OpenAI-compatible LLM
-- [ ] finish/merge the hardened production-runtime gate
+- [ ] merge the reviewed calibration candidate
 - [ ] deploy to the real HTTPS target and pass production smoke
-- [ ] clean stale diagnostic branches/PRs
 - [ ] publish/tag `v1.0.0`
 
 For the detailed history and exact status, start at [`docs/project-history/README.md`](docs/project-history/README.md).
