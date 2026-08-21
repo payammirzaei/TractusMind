@@ -61,6 +61,18 @@ _RELEASE_TERMS = (
     "changelog",
     "migration",
 )
+_OVERVIEW_PATTERNS = (
+    "what is tractus x",
+    "what is tractus-x",
+    "what is eclipse tractus x",
+    "what is eclipse tractus-x",
+    "explain tractus x",
+    "explain tractus-x",
+    "about tractus x",
+    "about tractus-x",
+    "overview of tractus x",
+    "overview of tractus-x",
+)
 
 _VERSION_PATTERNS = (
     re.compile(r"\b(?:version|release)\s*[:=]?\s*v?(\d+\.\d+(?:\.\d+)?)\b", re.I),
@@ -91,6 +103,7 @@ class QueryRouter:
         )
         version = self._extract_version(query)
         release = self._contains_any(normalized, _RELEASE_TERMS) or version is not None
+        overview = self._contains_any(normalized, _OVERVIEW_PATTERNS)
         ref = self._extract(_REF_RE, query)
         commit_sha = self._extract(_COMMIT_RE, query)
 
@@ -117,6 +130,11 @@ class QueryRouter:
         if release:
             self._extend(source_ids, "tractusx-release", "tractusx-docs")
             reasons.append("matched_release_or_version")
+        if overview and not source_ids:
+            # Broad identity/overview questions should be grounded in the official
+            # documentation and release repository, not incidental SDK/code matches.
+            self._extend(source_ids, "tractusx-docs", "tractusx-release")
+            reasons.append("matched_tractusx_overview")
 
         if debug and not source_ids:
             self._extend(
