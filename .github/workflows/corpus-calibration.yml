@@ -5,6 +5,8 @@ on:
   pull_request:
     paths:
       - ".github/workflows/corpus-calibration.yml"
+      - "app/ingestion/**"
+      - "tests/test_content_fetcher.py"
 
 permissions:
   contents: read
@@ -73,6 +75,9 @@ jobs:
       - name: Install
         run: python -m pip install -e ".[dev]"
 
+      - name: Verify ingestion regression coverage
+        run: pytest -q tests/test_content_fetcher.py tests/test_chunking.py
+
       - name: Bootstrap isolated calibration database
         run: tractusmind-db bootstrap
 
@@ -89,11 +94,22 @@ jobs:
           for source in get_enabled_sources():
               print(source.id)
           PY
+
+          failures=()
           while IFS= read -r source_id; do
             echo "Synchronizing ${source_id}"
-            tractusmind-ingest sync "$source_id" \
-              | tee "artifacts/calibration/sync/${source_id}.json"
+            if ! tractusmind-ingest sync "$source_id" \
+              | tee "artifacts/calibration/sync/${source_id}.json"; then
+              echo "Source synchronization failed: ${source_id}" >&2
+              failures+=("$source_id")
+            fi
           done < artifacts/calibration/enabled-sources.txt
+
+          if (( ${#failures[@]} > 0 )); then
+            printf '%s\n' "${failures[@]}" | tee artifacts/calibration/failed-sources.txt
+            echo "Corpus synchronization failed for ${#failures[@]} source(s)." >&2
+            exit 1
+          fi
 
       - name: Validate full corpus and upstream refs
         run: >-
