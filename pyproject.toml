@@ -40,6 +40,7 @@ tractusmind-benchmark = "app.evaluation.cli:main"
 tractusmind-answer-eval = "app.evaluation.answer_cli:main"
 tractusmind-corpus-validate = "app.evaluation.corpus_cli:main"
 tractusmind-quality-gate = "app.evaluation.quality_gate:main"
+tractusmind-perf = "app.evaluation.performance_cli:main"
 tractusmind-db = "app.db.cli:main"
 tractusmind-scheduler = "app.workers.scheduler:main"
 
