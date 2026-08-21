@@ -1,61 +1,62 @@
 # Railway production deployment runbook
 
-This runbook adapts the hardened TractusMind production architecture to Railway without pretending
-that Docker Compose networking, host-mounted secrets, or the Caddy edge exist unchanged on the
-platform. The self-hosted topology remains documented in `docs/production-deployment.md`.
+This runbook adapts the hardened TractusMind production architecture to Railway without pretending Docker Compose networking, host-mounted secrets, or the Caddy edge exist unchanged on the platform. The self-hosted topology remains documented in `docs/production-deployment.md`.
 
-Railway-specific behavior should be rechecked against the current Railway documentation before a
-live release because platform semantics can change.
+Railway platform behavior should be rechecked against current Railway documentation before the live release.
 
 ## Target topology
 
 ```text
 Internet
    |
-   | Railway HTTPS / custom domain
-   v
+Railway HTTPS / custom domain
+   |
 Mission Control (Next.js)  [public]
    |
-   | BFF only, Railway private network
+   | BFF only over Railway private network
    v
 FastAPI API                [private]
    |        |        |
    |        |        +------> external LLM provider
-   |        |
-   |        +---------------> Qdrant [private + persistent volume]
-   |
-   +---- PostgreSQL [managed/private]
-   +---- Redis      [managed/private]
+   |        +---------------> Qdrant [private + persistent]
+   +------------------------> PostgreSQL [managed/private]
+   +------------------------> Redis [managed/private]
 
-Ingestion worker            [private/no domain]
-   |---- PostgreSQL / Redis / Qdrant
-   +---- GitHub provider egress
-
-Scheduler                   [private/no domain]
-   +---- Redis / control data
+Ingestion worker           [private/no domain]
+Scheduler                  [private/no domain]
 ```
 
-The browser should not receive a backend bearer token and should not call FastAPI directly. Keep the
-existing Mission Control BFF/session boundary: only the Next.js service needs public networking;
-FastAPI, Redis, PostgreSQL, Qdrant, worker, and scheduler stay private.
+The browser never needs a direct FastAPI URL or backend bearer token. Only Mission Control receives public networking.
 
-Railway private service DNS uses `<service-name>.railway.internal`. Unlike Docker Compose, there is
-no host port-mapping layer on private networking: connect to the port the destination process
-actually listens on.
+Railway private DNS uses `<service-name>.railway.internal`.
+
+## Config as code
+
+Repository-backed services have reviewed Railway config files under [`../deploy/railway/`](../deploy/railway/README.md):
+
+| Service | Root Directory | Config File |
+| --- | --- | --- |
+| `frontend` | `/frontend` | `/deploy/railway/frontend.railway.json` |
+| `api` | `/` | `/deploy/railway/api.railway.json` |
+| `worker` | `/` | `/deploy/railway/worker.railway.json` |
+| `scheduler` | `/` | `/deploy/railway/scheduler.railway.json` |
+
+Railway's Config File path is repository-absolute and does not follow Root Directory. Configure both values explicitly in each service.
+
+The files pin Dockerfile builds, watch paths, start commands, healthchecks where applicable, restart behavior, and the single API pre-deploy migration/bootstrap command. Secrets and managed-service references stay in Railway variables.
 
 ## Services
 
 ### `frontend`
 
-Source: this repository with root directory `frontend/` and `frontend/Dockerfile`.
-
+- source root: `/frontend`
+- config: `/deploy/railway/frontend.railway.json`
 - public networking: enabled
-- healthcheck path: `/api/health`
-- expected container port: `3000` unless Railway overrides `PORT`
+- healthcheck: `/api/health`
 - backend URL: `http://api.railway.internal:8000`
-- custom domain: add only after the Railway-provided domain passes smoke tests
+- add the final custom domain only after the temporary Railway domain passes smoke
 
-Required runtime configuration includes:
+Runtime variables:
 
 ```text
 TRACTUSMIND_API_URL=http://api.railway.internal:8000
@@ -66,210 +67,178 @@ TRACTUSMIND_OIDC_SCOPES=openid profile email
 TRACTUSMIND_OIDC_REDIRECT_URI=https://<public-domain>/api/oidc/callback
 ```
 
-Do not configure the OIDC redirect URI until the final public hostname is known.
+Do not finalize the OIDC redirect URI before the final public hostname is known.
 
 ### `api`
 
-Source: repository root using the root `Dockerfile`.
-
+- source root: `/`
+- config: `/deploy/railway/api.railway.json`
 - public networking: disabled
-- process port: `8000`
-- healthcheck path: `/health/ready`
+- healthcheck: `/health/ready`
 - one Uvicorn process for the v1 CPU profile
-- baseline resource target: 2 CPU and 4 GiB memory when the selected Railway plan supports it
+- baseline target: 2 CPU / 4 GiB memory when the Railway plan supports it
 
-The CPU-only release gate is documented in `docs/cpu-performance.md`. On the certified two-CPU
-workload, local model compute is well inside the pinned release budget; a GPU is not a v1
-requirement.
+The start command uses Railway's injected `PORT` with `8000` as fallback. The API config runs `tractusmind-db bootstrap` as the only pre-deploy migration writer.
 
-Railway performs deployment healthchecks from `healthcheck.railway.app`. Include that hostname in
-`TRUSTED_HOSTS` together with the private API hostname used by internal callers. Railway healthchecks
-protect deployment activation but are not continuous uptime monitoring; retain Prometheus/alerts or
-another continuous monitor for runtime operations.
+The CPU-only gate in `docs/cpu-performance.md` demonstrates that the local retrieval-model query path fits the pinned two-CPU budget; a GPU is not required for v1.
+
+Include `api.railway.internal` and Railway's healthcheck host in `TRUSTED_HOSTS`.
 
 ### `worker`
 
-Source: repository root using the same backend image/Dockerfile as the API, with the start command
-overridden to the production ingestion worker command:
+- source root: `/`
+- config: `/deploy/railway/worker.railway.json`
+- public networking: disabled
+- one Dramatiq process / one thread for the v1 baseline
 
-```bash
-dramatiq app.workers.tasks --processes 1 --threads 1
-```
-
-Keep it private and do not generate a domain. The worker owns expensive source synchronization and
-corpus embedding so full ingestion cannot block the API process.
+The worker owns expensive ingestion and embedding work so source synchronization cannot block the API process. Do not run the multi-hour release calibration as a worker startup task.
 
 ### `scheduler`
 
-Source: repository root using the backend image with start command:
-
-```bash
-tractusmind-scheduler
-```
-
-Keep it private and do not generate a domain.
+- source root: `/`
+- config: `/deploy/railway/scheduler.railway.json`
+- public networking: disabled
+- start command: `tractusmind-scheduler`
 
 ### PostgreSQL and Redis
 
-Prefer Railway managed PostgreSQL and Redis rather than reproducing the Compose database containers.
-Use Railway reference variables so application connection variables follow the managed service
-credentials instead of copying hostnames/passwords manually.
+Prefer Railway managed PostgreSQL and Redis. Use Railway reference variables rather than copying resolved hostnames/passwords into source control.
 
-TractusMind expects an async SQLAlchemy PostgreSQL URL and a Redis URL. Validate the exact supplied
-Railway variables before mapping them; do not commit credentials or resolved connection strings.
+TractusMind accepts ordinary `postgresql://` URLs and converts them to the async SQLAlchemy driver form internally when needed.
 
 ### Qdrant
 
-Deploy the pinned Qdrant image line validated by the repository, currently `qdrant/qdrant:v1.19.0`,
-as a private Railway service. Attach a Railway volume at the Qdrant storage path used by the image
-(`/qdrant/storage`) and expose no public domain.
+Deploy the validated image line:
 
-Application services connect privately, for example:
+```text
+qdrant/qdrant:v1.19.0
+```
+
+Keep it private, attach persistent storage at `/qdrant/storage`, and connect from application services with:
 
 ```text
 QDRANT_URL=http://qdrant.railway.internal:6333
 ```
 
-Qdrant persistence and PostgreSQL backups must still be treated as one recovery set. If Qdrant is
-lost, rebuild it from the immutable allowlisted Git snapshots before serving grounded answers.
-
-## Model cache decision
-
-The self-hosted Compose profile mounts `/home/app/.cache` into the non-root API and worker
-containers. Railway volumes are mounted with root ownership, and Railway documents a root-runtime
-compatibility switch for non-root images. Do **not** enable a root runtime merely to preserve the
-FastEmbed cache: the hardened TractusMind backend intentionally runs as a non-root user.
-
-For the first Railway deployment, keep the model cache ephemeral unless a non-root writable volume
-strategy is proven in a staging environment. A clean deployment may therefore redownload model
-artifacts before first use. The local model initialization itself is measured by the CPU performance
-gate; network download time is separate.
-
-If repeated download/cold-start time becomes material, prefer baking reviewed model assets into the
-container image during build over weakening the runtime user. Re-run Security/Trivy and CPU
-Performance after any such image change.
-
-## Database migration
-
-Use Railway's pre-deploy command on the API release to apply the schema before the new API becomes
-active:
-
-```bash
-alembic upgrade head
-```
-
-The API also checks database revision during startup and fails closed on a stale schema. Do not run
-multiple independent migration writers during the same release.
+PostgreSQL and Qdrant remain one logical recovery set. If Qdrant is lost, rebuild its corpus from the immutable allowlisted Git snapshots before serving grounded answers.
 
 ## Variables and secrets
 
-Railway variables replace the self-hosted `secrets/` bind mounts. At minimum, resolve these groups
-without placing secret values in source control:
+Railway variables replace the self-hosted `secrets/` bind mounts. Use the current application settings and `.env.production.example` as the authoritative inventory.
+
+Core API mapping:
 
 ```text
-# Core storage
+APP_ENV=production
 DATABASE_URL=...
 REDIS_URL=...
 QDRANT_URL=http://qdrant.railway.internal:6333
 QDRANT_COLLECTION=tractusmind_chunks
-
-# Providers
 LLM_BASE_URL=...
 LLM_API_KEY=...
 LLM_MODEL=...
-GITHUB_TOKEN=...
-
-# Security/runtime
-ENV=production
+OPS_ADMIN_KEY=...
+METRICS_ADMIN_KEY=...
 TRUSTED_HOSTS=api.railway.internal,healthcheck.railway.app
-API_DOCS_ENABLED=false
+DOCS_ENABLED=false
+TRUST_FORWARDED_FOR=true
 OIDC_ENABLED=false|true
 OIDC_ISSUER_URL=...
 OIDC_AUDIENCE=...
+OIDC_ALLOWED_ALGORITHMS=RS256
 OIDC_OPERATOR_ROLES=...
 OIDC_ADMIN_ROLES=...
-
-# Mission Control
-TRACTUSMIND_API_URL=http://api.railway.internal:8000
-TRACTUSMIND_OIDC_ENABLED=false|true
-TRACTUSMIND_OIDC_ISSUER_URL=...
-TRACTUSMIND_OIDC_CLIENT_ID=...
-TRACTUSMIND_OIDC_REDIRECT_URI=https://<public-domain>/api/oidc/callback
 ```
 
-Use the current `.env.production.example` and application settings as the authoritative variable
-inventory. The list above is a deployment map, not a replacement for configuration validation.
+Worker additionally needs `GITHUB_TOKEN` and the Dramatiq Prometheus temp-directory variables documented in `deploy/railway/README.md`.
+
+Never commit secret values or resolved managed-service credentials.
+
+## Database migration
+
+The API Railway config uses the same repository-owned bootstrap path as the hardened production topology:
+
+```text
+tractusmind-db bootstrap
+```
+
+Railway pre-deploy commands run before the new deployment becomes active. If the command exits non-zero, deployment must stop. Worker and scheduler do not run migrations independently.
+
+The API also checks database revision during startup and fails closed on stale schema.
+
+## Model cache decision
+
+The backend image intentionally runs non-root. Railway volumes can introduce root-ownership friction for non-root containers; do **not** set `RAILWAY_RUN_UID=0` merely to persist the FastEmbed cache.
+
+For the first deployment, keep model cache ephemeral. A clean deployment may redownload model artifacts before first use; that network download time is distinct from the measured local model compute budget.
+
+If cold downloads become operationally significant, prefer baking reviewed model assets into the image and then re-run Security and CPU Performance gates.
 
 ## Networking rules
 
 1. Generate a public domain only for Mission Control.
-2. Keep API, Qdrant, worker, scheduler, PostgreSQL, and Redis on Railway private networking.
-3. Point Mission Control's server-side BFF at `api.railway.internal:8000`.
-4. Do not expose Qdrant, Redis, PostgreSQL, Prometheus, or Alertmanager to the public internet.
-5. Do not carry Caddy into the Railway profile merely to mimic Compose. Railway terminates the
-   public HTTPS edge; application CSP/security headers remain the application's responsibility.
-6. Before release, verify HSTS and all browser security headers on the actual Railway/custom-domain
-   response, because the self-hosted Caddy header layer is absent.
+2. Keep API, Qdrant, worker, scheduler, PostgreSQL, and Redis private.
+3. Point the server-side BFF at `http://api.railway.internal:8000`.
+4. Do not expose data stores or internal observability endpoints publicly.
+5. Do not carry Caddy into Railway merely to mimic Compose; Railway owns the public HTTPS edge.
+6. Re-verify CSP, HSTS and security headers on the actual Railway/custom-domain response because the self-hosted Caddy header layer is absent.
 
-## Health and deployment behavior
-
-Configure:
+## Health behavior
 
 ```text
-frontend healthcheck: /api/health
-api healthcheck:      /health/ready
+frontend: /api/health
+api:      /health/ready
 ```
 
-`/health/ready` checks PostgreSQL, Redis, and Qdrant, making it appropriate for deployment
-activation. A successful Railway deployment healthcheck is not proof of continuous health after the
-deployment becomes active; production alerting remains required.
+`/health/ready` checks PostgreSQL, Redis and Qdrant and is appropriate for deployment activation. Railway deployment healthchecks are not a substitute for continuous runtime monitoring.
 
-If a Railway service has an attached volume, current Railway behavior can introduce a short redeploy
-downtime because old and new deployments cannot mount the same volume simultaneously. This matters
-most for the Qdrant service; normal application deployments should not require a Qdrant redeploy.
+A volume-backed Qdrant redeploy may have different availability characteristics from stateless app redeploys; normal frontend/API changes should not require redeploying Qdrant.
 
 ## Staging sequence
 
-1. create managed PostgreSQL and Redis
-2. create private Qdrant and attach its persistent volume
-3. deploy API privately and map storage/provider variables
-4. run `alembic upgrade head` as the pre-deploy migration
-5. configure API `/health/ready`
-6. deploy worker and scheduler privately
-7. deploy Mission Control with `TRACTUSMIND_API_URL` pointing to private API DNS
-8. configure Mission Control `/api/health`
-9. generate the temporary Railway frontend domain
-10. smoke session creation, BFF auth, Copilot, citations, evidence inspector, Sources/Ops/Quality,
-    admin mutation, and logout
-11. enable/configure OIDC only after the callback hostname is final
-12. add the custom domain and repeat HTTPS/security-header/OIDC smoke
-13. run a live end-to-end latency sample; compare local-model telemetry with the certified CPU gate
-14. verify backup and recovery procedures before tagging the release
+1. create a Railway project/environment,
+2. add managed PostgreSQL and Redis,
+3. add private Qdrant and attach `/qdrant/storage`,
+4. create `api`, `worker`, `scheduler`, and `frontend` from this GitHub repository,
+5. set Root Directory + Config File for each service from the table above,
+6. wire API storage/provider/security variables,
+7. deploy API and confirm the pre-deploy bootstrap succeeds,
+8. wait for API `/health/ready`,
+9. deploy worker and scheduler,
+10. wire frontend variables to private API DNS,
+11. deploy frontend and generate a temporary Railway domain,
+12. smoke session creation, BFF auth, Copilot, citations/evidence, Sources/Ops/Quality, admin mutation and logout,
+13. configure OIDC only after the callback hostname is final,
+14. add the final custom domain and repeat HTTPS/security-header/OIDC smoke,
+15. run a live latency sample and compare local-model telemetry with the certified CPU gate,
+16. verify backup/recovery behavior before the release tag.
 
 ## Release evidence required
 
 Do not call the Railway deployment release-certified until all of these are recorded:
 
-- `/health/ready` is green through the deployed path
-- Mission Control BFF can reach the private API without public API exposure
-- Secure session cookie and CSRF rejection work on the final HTTPS hostname
-- OIDC works with the real issuer if enabled
-- real LLM provider passes the Quality Gate
-- full-corpus calibration threshold is pinned
-- live latency is compatible with the CPU performance budget
-- PostgreSQL backup/restore proof remains green
-- Qdrant persistence/rebuild procedure is verified
-- browser CSP/HSTS/security headers are correct without the self-hosted Caddy edge
+- `/health/ready` is green on the deployed API,
+- Mission Control BFF reaches FastAPI over private networking,
+- no backend/data service has an unintended public domain,
+- Secure session cookie and cross-site mutation rejection work on final HTTPS,
+- OIDC works with the real issuer if enabled,
+- the real LLM provider passes the Quality Gate,
+- full-corpus calibration threshold is pinned,
+- live latency remains compatible with CPU budgets,
+- PostgreSQL backup/recovery is verified,
+- Qdrant persistence/rebuild behavior is verified,
+- browser CSP/HSTS/security headers are correct on Railway's edge.
 
 ## Railway references
 
-Current Railway documentation used when writing this runbook:
+Current Railway documentation used for this profile:
 
-- https://docs.railway.com/guides/docker-compose
+- https://docs.railway.com/config-as-code
+- https://docs.railway.com/config-as-code/reference
+- https://docs.railway.com/deployments/monorepo
+- https://docs.railway.com/deployments/pre-deploy-command
 - https://docs.railway.com/deployments/healthchecks
 - https://docs.railway.com/networking/private-networking
 - https://docs.railway.com/volumes
-- https://docs.railway.com/deployments
 
-These links are operational references only. Repository tests, measured artifacts, and the actual
-staging deployment remain the release evidence.
+Repository tests, measured artifacts, and the actual staging deployment remain the release evidence.
