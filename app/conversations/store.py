@@ -190,6 +190,9 @@ class ConversationStore:
                     owner_user_id=owner_user_id,
                 )
                 session.add(conversation)
+                # AnswerInteraction references the new conversation by raw FK value rather
+                # than an ORM relationship, so explicitly persist the parent first.
+                await session.flush()
             else:
                 self._require_owner(conversation, owner_user_id)
                 conversation.updated_at = datetime.now(UTC)
@@ -259,6 +262,7 @@ class ConversationStore:
                         owner_user_id=owner_user_id,
                     )
                 )
+                await session.flush()
             else:
                 self._require_owner(conversation, owner_user_id)
                 conversation.updated_at = datetime.now(UTC)
