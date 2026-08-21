@@ -79,6 +79,7 @@ def validate_production_files() -> None:
         "config/Caddyfile.ui.prod",
         "scripts/production_smoke.py",
         ".github/workflows/production-runtime.yml",
+        ".github/workflows/backup-restore.yml",
         ".github/workflows/quality-gate.yml",
         ".github/workflows/full-corpus-validation.yml",
     )
@@ -99,6 +100,7 @@ def main() -> int:
     print(f"  calibrated threshold: {threshold:.6f}")
     print(f"  enabled sources: {source_count}")
     print("  production topology: present")
+    print("  backup/restore proof workflow: present")
     return 0
 
 
