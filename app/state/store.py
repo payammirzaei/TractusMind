@@ -177,9 +177,53 @@ class SourceStateStore:
             snapshot_commit_sha=manifest.commit_sha,
             discovered_count=len(manifest.files),
         )
+        now = datetime.now(UTC)
         async with self.sessions.begin() as session:
+            stale_runs = (
+                await session.scalars(
+                    select(IngestionRun).where(
+                        IngestionRun.source_id == manifest.source_id,
+                        IngestionRun.status == "running",
+                    )
+                )
+            ).all()
+            for stale in stale_runs:
+                stale.status = "failed"
+                stale.error_message = (
+                    "Interrupted before completion; superseded by a newer source sync run"
+                )
+                stale.finished_at = now
             session.add(run)
         return run.run_id
+
+    async def update_run_progress(
+        self,
+        run_id: str,
+        *,
+        added_count: int | None = None,
+        modified_count: int | None = None,
+        deleted_count: int | None = None,
+        unchanged_count: int | None = None,
+        fetched_count: int | None = None,
+        chunk_count: int | None = None,
+        indexed_count: int | None = None,
+    ) -> None:
+        updates = {
+            "added_count": added_count,
+            "modified_count": modified_count,
+            "deleted_count": deleted_count,
+            "unchanged_count": unchanged_count,
+            "fetched_count": fetched_count,
+            "chunk_count": chunk_count,
+            "indexed_count": indexed_count,
+        }
+        async with self.sessions.begin() as session:
+            run = await session.get(IngestionRun, run_id)
+            if run is None or run.status != "running":
+                return
+            for field, value in updates.items():
+                if value is not None:
+                    setattr(run, field, value)
 
     async def complete_run(
         self,
