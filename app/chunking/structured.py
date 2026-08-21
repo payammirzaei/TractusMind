@@ -58,10 +58,8 @@ class StructuredChunker:
 
     def _chunk_turtle(self, document: RawDocument) -> list[KnowledgeChunk]:
         lines = document.content.splitlines(keepends=True)
-        prefix_indices = [index for index, line in enumerate(lines) if _TTL_PREFIX_RE.match(line)]
-        prefix_lines = [lines[index].rstrip("\n") for index in prefix_indices]
-        prefix_context = "\n".join(prefix_lines)
-        prefix_start_line = prefix_indices[0] + 1 if prefix_indices else None
+        prefix_lines: list[str] = []
+        prefix_start_line: int | None = None
 
         chunks: list[KnowledgeChunk] = []
         statement_start: int | None = None
@@ -70,7 +68,12 @@ class StructuredChunker:
 
         for index, line in enumerate(lines):
             stripped = line.strip()
-            if not stripped or _TTL_PREFIX_RE.match(line):
+            if not stripped:
+                continue
+            if _TTL_PREFIX_RE.match(line):
+                if prefix_start_line is None:
+                    prefix_start_line = index + 1
+                prefix_lines.append(line.rstrip("\n"))
                 continue
 
             if statement_start is None:
@@ -79,6 +82,7 @@ class StructuredChunker:
 
             if stripped.endswith("."):
                 statement = "".join(statement_lines).strip()
+                prefix_context = "\n".join(prefix_lines)
                 text = f"{prefix_context}\n\n{statement}" if prefix_context else statement
                 chunk_start_line = prefix_start_line or statement_start + 1
                 if len(text) <= self.max_chars:
@@ -121,6 +125,7 @@ class StructuredChunker:
 
         if statement_lines and statement_start is not None:
             trailing = "".join(statement_lines).strip()
+            prefix_context = "\n".join(prefix_lines)
             chunks.append(
                 make_chunk(
                     document,
