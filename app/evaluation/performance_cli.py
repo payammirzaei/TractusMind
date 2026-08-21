@@ -12,6 +12,7 @@ from time import perf_counter
 from app.core.config import Settings
 from app.embeddings.service import DenseEmbeddingService
 from app.embeddings.sparse import SparseEmbeddingService
+from app.evaluation.performance_gate import evaluate_performance_budget
 from app.reranking.service import CrossEncoderReranker
 from app.retrieval.models import RetrievalHit
 
@@ -243,6 +244,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--candidate-count", type=int, default=20)
     parser.add_argument("--candidate-chars", type=int, default=1200)
     parser.add_argument("--rerank-limit", type=int, default=6)
+    parser.add_argument("--budget", type=Path)
     parser.add_argument("--output", type=Path, default=Path("artifacts/cpu-performance.json"))
     return parser
 
@@ -260,9 +262,19 @@ def main() -> None:
         parser.error("--rerank-limit must be between 1 and --candidate-count")
 
     report = asyncio.run(measure(args))
+    violations: list[str] = []
+    if args.budget is not None:
+        gate, violations = evaluate_performance_budget(report, args.budget)
+        report["budget_gate"] = gate
+
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=2))
+
+    if violations:
+        for violation in violations:
+            print(f"PERFORMANCE BUDGET FAILURE: {violation}")
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
