@@ -17,6 +17,9 @@ def split_text_by_lines(
     overlap_lines: int = 3,
 ) -> list[TextRange]:
     """Split oversized text on line boundaries while retaining small overlap."""
+    if not text.strip():
+        return []
+
     if len(text) <= max_chars:
         line_count = max(1, text.count("\n") + 1)
         return [
