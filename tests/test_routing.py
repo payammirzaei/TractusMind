@@ -46,6 +46,41 @@ def test_generic_asset_query_routes_across_sdk_and_edc() -> None:
     assert "tractusx-docs" in route.source_ids
 
 
+def test_identity_query_routes_to_identity_stack() -> None:
+    route = QueryRouter().route("How does credential issuer identity management work?")
+
+    assert route.intent is QueryIntent.GENERAL
+    assert "tractusx-identityhub" in route.source_ids
+    assert "ssi-credential-issuer" in route.source_ids
+    assert "bpn-did-resolution-service" in route.source_ids
+    assert "matched_identity" in route.reasons
+
+
+def test_bpdm_query_routes_to_business_partner_sources() -> None:
+    route = QueryRouter().route("What is BPDM and how is business partner data managed?")
+
+    assert "bpdm" in route.source_ids
+    assert "bpn-did-resolution-service" in route.source_ids
+    assert "matched_business_partner" in route.reasons
+
+
+def test_traceability_query_routes_to_traceability_sources() -> None:
+    route = QueryRouter().route("Explain Tractus-X traceability and item relationship resolution")
+
+    assert "traceability-foss" in route.source_ids
+    assert "item-relationship-service" in route.source_ids
+    assert "matched_traceability" in route.reasons
+
+
+def test_knowledge_agent_query_routes_to_agent_and_semantic_sources() -> None:
+    route = QueryRouter().route("How do Knowledge Agents use the AAS bridge?")
+
+    assert "knowledge-agents" in route.source_ids
+    assert "knowledge-agents-aas-bridge" in route.source_ids
+    assert "sldt-ontology-model" in route.source_ids
+    assert "matched_knowledge_agents" in route.reasons
+
+
 def test_explicit_ref_and_commit_become_exact_filter_constraints() -> None:
     route = QueryRouter().route(
         "Check EDC ref:v0.9.0 commit:abcdef1234567 for this connector behavior"
