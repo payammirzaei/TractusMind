@@ -7,11 +7,15 @@ from app.ingestion.models import SourceDefinition
 DEFAULT_REGISTRY_PATH = Path("config/sources.toml")
 
 
-def load_source_registry(path: Path = DEFAULT_REGISTRY_PATH) -> list[SourceDefinition]:
+def load_configured_sources(path: Path = DEFAULT_REGISTRY_PATH) -> list[SourceDefinition]:
+    """Load only the explicitly curated sources from the registry file."""
     with path.open("rb") as handle:
         raw = tomllib.load(handle)
+    return [SourceDefinition.model_validate(item) for item in raw.get("sources", [])]
 
-    sources = [SourceDefinition.model_validate(item) for item in raw.get("sources", [])]
+
+def load_source_registry(path: Path = DEFAULT_REGISTRY_PATH) -> list[SourceDefinition]:
+    sources = load_configured_sources(path)
     sources.extend(catalog_sources({source.id for source in sources}))
 
     ids = [source.id for source in sources]
