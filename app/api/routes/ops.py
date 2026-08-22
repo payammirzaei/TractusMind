@@ -22,6 +22,9 @@ class SourceOpsStatus(BaseModel):
     source_id: str
     repository: str
     component: str
+    domain: str
+    source_type: str
+    catalog_state: str
     priority: str
     enabled: bool
     configured_ref: str
@@ -113,6 +116,9 @@ async def _source_responses(request: Request) -> list[SourceOpsStatus]:
                 source_id=source.id,
                 repository=source.full_name,
                 component=source.component,
+                domain=source.domain,
+                source_type=source.source_type,
+                catalog_state=source.catalog_state,
                 priority=source.priority.value,
                 enabled=source.enabled,
                 configured_ref=source.ref,
