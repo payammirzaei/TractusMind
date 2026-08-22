@@ -51,6 +51,7 @@ jobs:
           sed -i 's/^OIDC_ENABLED=.*/OIDC_ENABLED=false/' .env.production
           sed -i 's|^TRACTUSMIND_OIDC_REDIRECT_URI=.*|TRACTUSMIND_OIDC_REDIRECT_URI=https://localhost/api/oidc/callback|' .env.production
           cat >> .env.production <<'EOF'
+          SESSION_SIGNING_KEY=ci-production-session-signing-key-913eb444
           API_MEMORY_LIMIT=2g
           API_CPU_LIMIT=2.0
           WORKER_MEMORY_LIMIT=2g
@@ -159,20 +160,31 @@ jobs:
           echo 'Caddy HTTPS edge did not become ready'
           exit 1
 
-      - name: Provision a real admin API identity through the private production API
+      - name: Provision a real password admin through the private production API
         id: credential
         shell: bash
         run: |
           set -euo pipefail
-          api_key="$($COMPOSE_CMD exec -T api python - <<'PY'
+          smoke_username='production-smoke-admin'
+          smoke_password='ci-production-smoke-password-913eb444'
+          $COMPOSE_CMD exec -T api python - "$smoke_username" "$smoke_password" <<'PY'
           import json
+          import sys
           import urllib.request
           from pathlib import Path
 
+          username, password = sys.argv[1:3]
           admin_key = Path('/run/secrets/ops_admin_key').read_text().strip()
-          payload = json.dumps({'display_name': 'Production Smoke Admin', 'role': 'admin'}).encode()
+          payload = json.dumps(
+              {
+                  'display_name': 'Production Smoke Admin',
+                  'username': username,
+                  'password': password,
+                  'role': 'admin',
+              }
+          ).encode()
           request = urllib.request.Request(
-              'http://127.0.0.1:8000/v1/ops/users',
+              'http://127.0.0.1:8000/v1/ops/users/password',
               data=payload,
               method='POST',
               headers={
@@ -183,21 +195,20 @@ jobs:
           )
           with urllib.request.urlopen(request, timeout=20) as response:
               body = json.loads(response.read().decode())
-          api_key = body['api_key']
-          if not api_key.startswith('tm_'):
-              raise RuntimeError('unexpected API key shape')
-          print(api_key)
+          if body.get('username') != username or body.get('role') != 'admin':
+              raise RuntimeError(f'unexpected password user response: {body}')
           PY
-          )"
-          test "${api_key#tm_}" != "$api_key"
-          echo "api_key=$api_key" >> "$GITHUB_OUTPUT"
-          echo "::add-mask::$api_key"
+          echo "username=$smoke_username" >> "$GITHUB_OUTPUT"
+          echo "password=$smoke_password" >> "$GITHUB_OUTPUT"
+          echo "::add-mask::$smoke_password"
 
       - name: Run authenticated HTTPS production smoke
         shell: bash
         env:
           TRACTUSMIND_PRODUCTION_URL: https://localhost
-          TRACTUSMIND_PRODUCTION_SMOKE_API_KEY: ${{ steps.credential.outputs.api_key }}
+          TRACTUSMIND_PRODUCTION_SMOKE_SESSION_USERNAME: ${{ steps.credential.outputs.username }}
+          TRACTUSMIND_PRODUCTION_SMOKE_SESSION_PASSWORD: ${{ steps.credential.outputs.password }}
+          TRACTUSMIND_PRODUCTION_SMOKE_WEBHOOK_SECRET: ci-webhook-secret-913eb444
           TRACTUSMIND_PRODUCTION_SMOKE_CA_FILE: artifacts/production-runtime/caddy-ca-bundle.crt
         run: |
           set -euo pipefail
