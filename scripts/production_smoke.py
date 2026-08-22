@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import http.cookiejar
 import json
 import os
@@ -14,7 +16,9 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 BASE_URL = os.environ.get("TRACTUSMIND_PRODUCTION_URL", "").rstrip("/")
-API_KEY = os.environ.get("TRACTUSMIND_PRODUCTION_SMOKE_API_KEY", "")
+SESSION_USERNAME = os.environ.get("TRACTUSMIND_PRODUCTION_SMOKE_SESSION_USERNAME", "").strip()
+SESSION_PASSWORD = os.environ.get("TRACTUSMIND_PRODUCTION_SMOKE_SESSION_PASSWORD", "")
+WEBHOOK_SECRET = os.environ.get("TRACTUSMIND_PRODUCTION_SMOKE_WEBHOOK_SECRET", "")
 CA_FILE = os.environ.get("TRACTUSMIND_PRODUCTION_SMOKE_CA_FILE", "").strip()
 
 
@@ -67,8 +71,8 @@ def main() -> int:
     parsed = urlparse(BASE_URL)
     if parsed.scheme != "https" or not parsed.netloc:
         fail("Production URL must be an absolute HTTPS URL")
-    if not API_KEY.startswith("tm_"):
-        fail("TRACTUSMIND_PRODUCTION_SMOKE_API_KEY must be a TractusMind API key")
+    if not SESSION_USERNAME or not SESSION_PASSWORD:
+        fail("Production smoke session username and password are required")
     if CA_FILE and not Path(CA_FILE).is_file():
         fail(f"Production smoke CA file does not exist: {CA_FILE}")
 
@@ -87,6 +91,7 @@ def main() -> int:
         expected: tuple[int, ...] = (200,),
         origin: str | None = None,
         fetch_site: str | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> tuple[int, object, dict[str, str]]:
         data = None
         headers = {"Accept": "application/json"}
@@ -95,6 +100,8 @@ def main() -> int:
             headers["Content-Type"] = "application/json"
             headers["Origin"] = origin or BASE_URL
             headers["Sec-Fetch-Site"] = fetch_site or "same-origin"
+        if extra_headers:
+            headers.update(extra_headers)
         req = urllib.request.Request(
             f"{BASE_URL}{path}", data=data, method=method, headers=headers
         )
@@ -140,11 +147,58 @@ def main() -> int:
     _, backend_health, _ = call("/api/backend/health/ready")
     assert_dependency_health(backend_health)
 
+    if WEBHOOK_SECRET:
+        print("[prod-smoke] checking signed GitHub webhook edge and delivery dedupe")
+        webhook_payload: dict[str, object] = {"zen": "production smoke"}
+        webhook_body = json.dumps(webhook_payload).encode("utf-8")
+        signature = "sha256=" + hmac.new(
+            WEBHOOK_SECRET.encode("utf-8"), webhook_body, hashlib.sha256
+        ).hexdigest()
+        webhook_headers = {
+            "X-GitHub-Event": "ping",
+            "X-GitHub-Delivery": "production-runtime-smoke-ping",
+            "X-Hub-Signature-256": signature,
+        }
+        _, webhook_response, _ = call(
+            "/v1/webhooks/github",
+            method="POST",
+            payload=webhook_payload,
+            expected=(202,),
+            extra_headers=webhook_headers,
+        )
+        if not isinstance(webhook_response, dict) or not webhook_response.get("accepted"):
+            fail(f"Signed GitHub webhook was not accepted: {webhook_response}")
+        if webhook_response.get("duplicate") is not False:
+            fail(f"First GitHub webhook delivery was unexpectedly duplicate: {webhook_response}")
+
+        _, duplicate_response, _ = call(
+            "/v1/webhooks/github",
+            method="POST",
+            payload=webhook_payload,
+            expected=(202,),
+            extra_headers=webhook_headers,
+        )
+        if not isinstance(duplicate_response, dict) or duplicate_response.get("duplicate") is not True:
+            fail(f"GitHub webhook delivery dedupe failed: {duplicate_response}")
+
+        invalid_headers = {
+            **webhook_headers,
+            "X-GitHub-Delivery": "production-runtime-smoke-invalid",
+            "X-Hub-Signature-256": "sha256=deadbeef",
+        }
+        call(
+            "/v1/webhooks/github",
+            method="POST",
+            payload=webhook_payload,
+            expected=(401,),
+            extra_headers=invalid_headers,
+        )
+
     print("[prod-smoke] verifying browser mutation boundary rejects cross-site requests")
     call(
         "/api/session",
         method="POST",
-        payload={"token": API_KEY},
+        payload={"username": SESSION_USERNAME, "password": SESSION_PASSWORD},
         expected=(403,),
         origin="https://cross-site.invalid",
         fetch_site="cross-site",
@@ -152,7 +206,9 @@ def main() -> int:
 
     print("[prod-smoke] authenticating through the real Mission Control session boundary")
     _, identity, session_headers = call(
-        "/api/session", method="POST", payload={"token": API_KEY}
+        "/api/session",
+        method="POST",
+        payload={"username": SESSION_USERNAME, "password": SESSION_PASSWORD},
     )
     if not isinstance(identity, dict) or not identity.get("user_id"):
         fail(f"Unexpected production identity: {identity}")
