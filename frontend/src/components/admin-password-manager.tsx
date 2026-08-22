@@ -16,7 +16,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T;
 }
 
-export function AdminPasswordManager({ inline = false }: { inline?: boolean }) {
+export function AdminPasswordManager() {
   const [open, setOpen] = useState(false);
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [identity, setIdentity] = useState<Identity | null>(null);
@@ -94,38 +94,15 @@ export function AdminPasswordManager({ inline = false }: { inline?: boolean }) {
 
   return (
     <>
-      {inline ? (
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          aria-label="Manage human accounts"
-          className="tm-control flex w-full items-center justify-center gap-2 rounded-xl border border-cyan-300/15 px-3 py-2.5 text-[10px] font-semibold uppercase tracking-[.12em] text-cyan-100"
-        >
-          <UserPlus className="size-3.5 text-cyan-300"/>
-          Human accounts
-        </button>
-      ) : (
-        <>
-          <button
-            type="button"
-            onClick={() => setOpen(true)}
-            aria-label="Manage human accounts"
-            className="tm-control fixed right-[132px] top-[82px] z-[80] hidden items-center gap-2 rounded-xl border border-cyan-300/15 bg-slate-950/75 px-3 py-2 text-[10px] font-semibold uppercase tracking-[.12em] text-cyan-100 shadow-xl backdrop-blur-md md:flex"
-          >
-            <UserPlus className="size-3.5 text-cyan-300"/>
-            Human accounts
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setOpen(true)}
-            aria-label="Manage human accounts"
-            className="tm-control fixed bottom-[76px] right-3 z-[80] flex size-10 items-center justify-center rounded-xl border border-cyan-300/15 bg-slate-950/80 text-cyan-100 shadow-xl backdrop-blur-md md:hidden"
-          >
-            <UserPlus className="size-4 text-cyan-300"/>
-          </button>
-        </>
-      )}
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label="Manage human accounts"
+        className="tm-control flex w-full items-center justify-center gap-2 rounded-xl border border-cyan-300/15 px-3 py-2.5 text-[10px] font-semibold uppercase tracking-[.12em] text-cyan-100"
+      >
+        <UserPlus className="size-3.5 text-cyan-300"/>
+        Human accounts
+      </button>
 
       {open && (
         <div className="fixed inset-0 z-[120] bg-black/65 backdrop-blur-sm" onMouseDown={(event) => { if (event.currentTarget === event.target) setOpen(false); }}>

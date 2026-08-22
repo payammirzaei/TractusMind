@@ -26,6 +26,7 @@ import { Badge } from "@/components/ui/badge";
 import { ChatWorkbench } from "@/components/chat-workbench";
 import { CommandCenter } from "@/components/command-center";
 import { DataDeck } from "@/components/data-deck";
+import { ThemeToggle } from "@/components/theme-toggle";
 import type { Identity, UserRole } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -118,9 +119,12 @@ function LoginConsole({ onReady, returnTo }: { onReady: (identity: Identity) => 
       <motion.div initial={{ opacity: 0, scale: .98, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} className="tm-shell relative w-full max-w-[540px] rounded-[28px] p-3">
         <span className="tm-screw absolute left-4 top-4"/><span className="tm-screw absolute right-4 top-4"/><span className="tm-screw absolute bottom-4 left-4"/><span className="tm-screw absolute bottom-4 right-4"/>
         <div className="tm-well tm-scanline rounded-[20px] px-6 py-8 sm:px-9">
-          <div className="mb-8 flex items-center gap-4">
-            <div className="tm-control grid size-12 place-items-center rounded-2xl border-cyan-300/15"><Sparkles className="size-5 text-cyan-200"/></div>
-            <div><div className="tm-label">TractusMind</div><h1 className="mt-1 text-xl font-semibold tracking-tight">Mission Control</h1></div>
+          <div className="mb-8 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="tm-control grid size-12 place-items-center rounded-2xl border-cyan-300/15"><Sparkles className="size-5 text-cyan-200"/></div>
+              <div><div className="tm-label">TractusMind</div><h1 className="mt-1 text-xl font-semibold tracking-tight">Mission Control</h1></div>
+            </div>
+            <ThemeToggle/>
           </div>
           <Badge className="mb-5 border-emerald-300/15 text-emerald-300"><span className="tm-led"/> secure console</Badge>
           <h2 className="text-3xl font-semibold tracking-[-.035em]">Engineering intelligence,<br/><span className="text-slate-500">with the panels open.</span></h2>
@@ -317,7 +321,7 @@ export function MissionControl({ view }: { view: MissionView }) {
         <section className="flex min-w-0 flex-1 flex-col p-1 sm:p-2">
           <header className="mb-2 flex h-12 items-center justify-between gap-3 px-2 sm:px-3">
             <div className="min-w-0"><div className="flex items-center gap-3"><span className="tm-label">{view === "chat" ? "copilot channel" : view === "overview" ? "command center" : `${view} console`}</span><span className="hidden h-3 w-px bg-white/8 sm:block"/><span className="hidden truncate text-[10px] text-slate-600 sm:block">{current.description}</span></div></div>
-            <div className="flex shrink-0 items-center gap-2"><button onClick={() => { setCommandQuery(""); setCommandOpen(true); }} className="tm-control flex size-8 items-center justify-center rounded-lg md:hidden" aria-label="Open command launcher"><Command className="size-3.5 text-cyan-200"/></button><Badge className={cn("hidden sm:inline-flex", healthBadgeClass)}><Activity className="size-3"/><span className={`tm-led ${healthLedClass}`}/> core {healthState}</Badge><Badge className="text-emerald-300"><span className="tm-led"/> connected</Badge></div>
+            <div className="flex shrink-0 items-center gap-2"><ThemeToggle/><button onClick={() => { setCommandQuery(""); setCommandOpen(true); }} className="tm-control flex size-8 items-center justify-center rounded-lg md:hidden" aria-label="Open command launcher"><Command className="size-3.5 text-cyan-200"/></button><Badge className={cn("hidden sm:inline-flex", healthBadgeClass)}><Activity className="size-3"/><span className={`tm-led ${healthLedClass}`}/> core {healthState}</Badge><Badge className="text-emerald-300"><span className="tm-led"/> connected</Badge></div>
           </header>
           {view === "chat" ? <ChatWorkbench /> : view === "overview" ? <CommandCenter identity={identity}/> : <DataDeck view={view} identity={identity} />}
           <nav className="tm-mobile-nav mt-2 grid gap-1 px-1 md:hidden" style={{ gridTemplateColumns: `repeat(${permitted.length}, minmax(0, 1fr))` }}>{permitted.map((item) => { const Icon = item.icon; const active = pathname === item.href; return <Link key={item.view} href={item.href} className={cn("flex min-w-0 flex-col items-center justify-center gap-1 rounded-lg px-1 py-2 text-[8px] uppercase tracking-[.08em] text-slate-600", active && "is-active text-cyan-200")}><Icon className="size-3.5"/><span className="truncate">{item.label}</span></Link>; })}</nav>
