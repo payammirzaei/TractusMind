@@ -1,6 +1,7 @@
 import tomllib
 from pathlib import Path
 
+from app.ingestion.catalog import catalog_sources
 from app.ingestion.models import SourceDefinition
 
 DEFAULT_REGISTRY_PATH = Path("config/sources.toml")
@@ -11,6 +12,8 @@ def load_source_registry(path: Path = DEFAULT_REGISTRY_PATH) -> list[SourceDefin
         raw = tomllib.load(handle)
 
     sources = [SourceDefinition.model_validate(item) for item in raw.get("sources", [])]
+    sources.extend(catalog_sources({source.id for source in sources}))
+
     ids = [source.id for source in sources]
     if len(ids) != len(set(ids)):
         raise ValueError("Source registry contains duplicate source ids")
