@@ -8,7 +8,7 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default: "text-slate-100",
-        primary: "border-cyan-300/25 bg-[linear-gradient(180deg,#1b4d59,#12313a_58%,#0c242b)] text-cyan-50 shadow-[0_7px_18px_rgba(0,0,0,.46),inset_0_1px_0_rgba(173,246,255,.2),0_0_22px_rgba(32,200,234,.035)]",
+        primary: "tm-button-primary border-cyan-300/25 bg-[linear-gradient(180deg,#1b4d59,#12313a_58%,#0c242b)] text-cyan-50 shadow-[0_7px_18px_rgba(0,0,0,.46),inset_0_1px_0_rgba(173,246,255,.2),0_0_22px_rgba(32,200,234,.035)]",
         danger: "border-red-300/20 bg-[linear-gradient(180deg,rgba(80,27,31,.52),rgba(35,14,17,.52))] text-red-200",
         ghost: "border-transparent bg-transparent shadow-none hover:border-white/5 hover:bg-white/[.045]",
       },
