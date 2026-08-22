@@ -1,4 +1,5 @@
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -16,6 +17,9 @@ class SourceDefinition(BaseModel):
     owner: str
     repo: str
     component: str
+    domain: str = "general"
+    source_type: str = "repository"
+    catalog_state: Literal["active", "archived", "meta", "empty"] = "active"
     priority: SourcePriority
     ref: str = "main"
     enabled: bool = True
