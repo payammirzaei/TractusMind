@@ -37,12 +37,14 @@ services:
       TRUST_FORWARDED_FOR: "true"
       DATABASE_URL_FILE: /run/secrets/database_url
       REDIS_URL_FILE: /run/secrets/redis_url
+      GITHUB_WEBHOOK_SECRET_FILE: /run/secrets/github_webhook_secret
       LLM_API_KEY_FILE: /run/secrets/llm_api_key
       OPS_ADMIN_KEY_FILE: /run/secrets/ops_admin_key
       METRICS_ADMIN_KEY_FILE: /run/secrets/metrics_admin_key
     secrets:
       - database_url
       - redis_url
+      - github_webhook_secret
       - llm_api_key
       - ops_admin_key
       - metrics_admin_key
@@ -305,6 +307,8 @@ secrets:
     file: ./secrets/llm_api_key
   github_token:
     file: ./secrets/github_token
+  github_webhook_secret:
+    file: ./secrets/github_webhook_secret
   ops_admin_key:
     file: ./secrets/ops_admin_key
   metrics_admin_key:
