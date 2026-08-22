@@ -5,7 +5,12 @@ from app.ingestion.models import SourceDefinition, SourcePriority
 from app.ingestion.webhook import matching_push_sources, verify_github_signature
 
 
-def source(*, owner: str = "eclipse-tractusx", repo: str = "tractusx-sdk", ref: str = "main") -> SourceDefinition:
+def source(
+    *,
+    owner: str = "eclipse-tractusx",
+    repo: str = "tractusx-sdk",
+    ref: str = "main",
+) -> SourceDefinition:
     return SourceDefinition(
         id=f"{owner}-{repo}-{ref}",
         owner=owner,
