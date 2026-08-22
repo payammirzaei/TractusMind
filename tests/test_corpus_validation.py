@@ -5,7 +5,7 @@ from app.core.config import Settings
 from app.evaluation.answers import load_answer_benchmark
 from app.evaluation.benchmark import load_benchmark
 from app.evaluation.corpus import IndexedSourceCounts, evaluate_corpus_contract
-from app.ingestion.registry import get_enabled_sources
+from app.ingestion.registry import get_enabled_sources, load_configured_sources
 from app.state.store import IngestionRunRecord, SourceStatusRecord
 
 
@@ -130,8 +130,8 @@ def test_full_corpus_contract_rejects_snapshot_behind_upstream() -> None:
     )
 
 
-def test_v1_benchmarks_cover_every_enabled_source() -> None:
-    enabled = {source.id for source in get_enabled_sources()}
+def test_v1_benchmarks_cover_every_curated_core_source() -> None:
+    core_sources = {source.id for source in load_configured_sources() if source.enabled}
 
     retrieval_cases = load_benchmark(Path("benchmarks/full_corpus_v1.jsonl"))
     retrieval_sources = {
@@ -148,6 +148,6 @@ def test_v1_benchmarks_cover_every_enabled_source() -> None:
         for source_id in case.expected_sources
     }
 
-    assert retrieval_sources == enabled
-    assert answer_sources == enabled
+    assert retrieval_sources == core_sources
+    assert answer_sources == core_sources
     assert any(not case.answerable for case in answer_cases)
