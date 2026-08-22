@@ -11,6 +11,7 @@ from app.api.routes.ask import router as ask_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.conversations import router as conversations_router
 from app.api.routes.feedback import router as feedback_router
+from app.api.routes.github_webhook import router as github_webhook_router
 from app.api.routes.health import router as health_router
 from app.api.routes.interaction_ops import router as interaction_ops_router
 from app.api.routes.me import router as me_router
@@ -62,6 +63,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         environment=settings.app_env,
         database_revision=database_revision,
         oidc_enabled=settings.oidc_enabled,
+        github_webhook_enabled=bool(settings.github_webhook_secret),
     )
 
     try:
@@ -100,6 +102,7 @@ app.include_router(interaction_ops_router)
 app.include_router(quality_ops_router)
 app.include_router(user_ops_router)
 app.include_router(metrics_router)
+app.include_router(github_webhook_router)
 
 app.add_middleware(
     RequestProtectionMiddleware,
