@@ -1,3 +1,4 @@
+# ruff: noqa: E501 -- dense static catalog rows are intentionally one line
 from __future__ import annotations
 
 from app.ingestion.models import SourceDefinition
