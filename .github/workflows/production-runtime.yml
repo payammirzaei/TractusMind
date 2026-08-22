@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/production-runtime.yml"
       - "docker-compose.prod.yml"
+      - "docker-compose.webhook.prod.yml"
       - "docker-compose.ui.prod.yml"
       - "config/Caddyfile.ui.prod"
       - "scripts/production_smoke.py"
@@ -26,7 +27,11 @@ jobs:
     timeout-minutes: 45
     env:
       COMPOSE_PROJECT_NAME: tractusmind_prod_ci
-      COMPOSE_CMD: docker compose --env-file .env.production -f docker-compose.prod.yml -f docker-compose.ui.prod.yml
+      COMPOSE_CMD: >-
+        docker compose --env-file .env.production
+        -f docker-compose.prod.yml
+        -f docker-compose.webhook.prod.yml
+        -f docker-compose.ui.prod.yml
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
