@@ -74,6 +74,96 @@ _OVERVIEW_PATTERNS = (
     "overview of tractus-x",
 )
 
+# Domain routes complement the original high-signal v1 routes. They deliberately
+# stay deterministic and small: organization-wide catalog growth must not turn
+# every question into an unfiltered search over every repository.
+_DOMAIN_ROUTES: tuple[tuple[tuple[str, ...], tuple[str, ...], str], ...] = (
+    (
+        (
+            "identity hub",
+            "identityhub",
+            "identity wallet",
+            "credential issuer",
+            "credential",
+            "decentralized identity",
+            " did ",
+            "portal iam",
+            "identity management",
+        ),
+        (
+            "tractusx-identityhub",
+            "ssi-credential-issuer",
+            "bpn-did-resolution-service",
+            "portal-iam",
+            "tractusx-profiles",
+            "tractusx-docs",
+        ),
+        "matched_identity",
+    ),
+    (
+        ("bpdm", "business partner data", "business partner", "business partner number"),
+        ("bpdm", "bpn-did-resolution-service", "tractusx-docs"),
+        "matched_business_partner",
+    ),
+    (
+        ("traceability", "item relationship", "irs", "traceability foss"),
+        ("traceability-foss", "item-relationship-service", "tractusx-docs"),
+        "matched_traceability",
+    ),
+    (
+        ("discovery finder", "bpn discovery", "service discovery"),
+        (
+            "sldt-discovery-finder",
+            "sldt-bpn-discovery",
+            "sd-factory",
+            "digital-twin-registry",
+            "tractusx-docs",
+        ),
+        "matched_discovery",
+    ),
+    (
+        ("knowledge agent", "knowledge agents", "aas bridge"),
+        (
+            "knowledge-agents",
+            "knowledge-agents-edc",
+            "knowledge-agents-aas-bridge",
+            "sldt-ontology-model",
+            "semantic-models",
+        ),
+        "matched_knowledge_agents",
+    ),
+    (
+        ("puris", "supply chain", "shortage", "stock", "demand capacity"),
+        ("puris", "industry-core-hub", "tractusx-docs"),
+        "matched_supply_chain",
+    ),
+    (
+        ("portal backend", "portal frontend", "tractus x portal", "tractus-x portal"),
+        ("portal", "portal-backend", "portal-frontend", "portal-iam", "tractusx-docs"),
+        "matched_portal",
+    ),
+    (
+        ("umbrella", "helm chart", "deployment chart", "tractus x deployment"),
+        ("tractus-x-umbrella", "charts", "tractus-x-umbrella-iac", "tractusx-docs"),
+        "matched_deployment",
+    ),
+    (
+        ("api hub", "api-hub", "sdk services"),
+        ("api-hub", "tractusx-sdk-services", "tractusx-sdk", "tractusx-docs"),
+        "matched_api_catalog",
+    ),
+    (
+        ("industry core", "industry-core"),
+        ("industry-core-hub", "semantic-models", "tractusx-docs"),
+        "matched_industry_core",
+    ),
+    (
+        ("security sig", "sig security", "tractus x security", "tractus-x security"),
+        ("sig-security", "tractusx-identityhub", "tractusx-edc", "tractusx-docs"),
+        "matched_security",
+    ),
+)
+
 _VERSION_PATTERNS = (
     re.compile(r"\b(?:version|release)\s*[:=]?\s*v?(\d+\.\d+(?:\.\d+)?)\b", re.I),
     re.compile(r"\bv(\d+\.\d+(?:\.\d+)?)\b", re.I),
@@ -130,9 +220,15 @@ class QueryRouter:
         if release:
             self._extend(source_ids, "tractusx-release", "tractusx-docs")
             reasons.append("matched_release_or_version")
+
+        for terms, sources, reason in _DOMAIN_ROUTES:
+            if self._contains_any(normalized, terms):
+                self._extend(source_ids, *sources)
+                reasons.append(reason)
+
         if overview and not source_ids:
-            # Broad identity/overview questions should be grounded in the official
-            # documentation and release repository, not incidental SDK/code matches.
+            # Broad overview questions should prefer canonical documentation and
+            # release material instead of incidental implementation matches.
             self._extend(source_ids, "tractusx-docs", "tractusx-release")
             reasons.append("matched_tractusx_overview")
 
