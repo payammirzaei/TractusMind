@@ -85,15 +85,14 @@ class CodeChunker:
 
         if language == "python":
             declarations = self._python_declarations(document.content)
-        elif language == "java":
-            # Real Tractus-X Java sources can terminate the interpreter inside
-            # the native tree-sitter grammar. A SIGSEGV cannot be caught by
-            # Python, so Java deliberately uses deterministic line-bounded code
-            # chunks. This preserves source text, stable IDs, and exact line
-            # provenance; retrieval quality is verified by corpus calibration.
-            return self._safe_code_chunks(document)
         else:
-            declarations = self._tree_sitter_declarations(document.content, language)
+            # Tractus-X contains real-world Java/Kotlin/TypeScript/JavaScript
+            # sources that can terminate the interpreter inside native
+            # tree-sitter grammars. SIGSEGV cannot be caught by Python, so
+            # production ingestion uses deterministic line-bounded chunks for
+            # these languages. Source text, stable IDs, and exact line
+            # provenance are preserved while removing the native crash surface.
+            return self._safe_code_chunks(document)
 
         if not declarations:
             return self._fallback_document_chunk(document)
@@ -130,13 +129,6 @@ class CodeChunker:
         return self._deduplicate(chunks)
 
     def _python_declarations(self, source: str) -> list[_DeclarationSnapshot]:
-        """Parse Python with the stdlib AST instead of a native parser.
-
-        Tractus-X contains valid Python sources that trigger a native SIGSEGV in
-        the tree-sitter Python grammar used by the language pack. A segfault is
-        not catchable in Python, so Python sources deliberately use the stdlib
-        parser while the other supported languages keep tree-sitter semantics.
-        """
         try:
             tree = ast.parse(source)
         except (SyntaxError, ValueError, TypeError, MemoryError):
@@ -239,9 +231,6 @@ class CodeChunker:
         source_bytes = source.encode("utf-8")
         parser = get_parser(language)
         tree = parser.parse(source_bytes)
-
-        # Materialize primitive data while the native tree is alive. No Node
-        # handles are retained after this call returns.
         declarations = list(
             self._walk_tree_sitter_declarations(
                 tree.root_node,
