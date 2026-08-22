@@ -77,6 +77,9 @@ export interface SourceStatus {
   source_id: string;
   repository: string;
   component: string;
+  domain: string;
+  source_type: string;
+  catalog_state: "active" | "archived" | "meta" | "empty";
   priority: string;
   enabled: boolean;
   configured_ref: string;
