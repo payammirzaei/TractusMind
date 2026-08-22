@@ -15,7 +15,7 @@ export const metadata: Metadata = {
 
 // Static, request-independent script: only reads a same-origin localStorage flag,
 // never reflects request/user input, so no injection surface despite dangerouslySetInnerHTML.
-const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem('tm-theme')==='light'?'light':'dark';document.documentElement.setAttribute('data-theme',t);}catch(e){}})();`;
+const THEME_INIT_SCRIPT = `(function(){try{var s=localStorage.getItem('tm-theme');var t=s==='dark'?'dark':'light';document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','light');}})();`;
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   // Nonce-based CSP requires request-time rendering so Next.js can propagate
