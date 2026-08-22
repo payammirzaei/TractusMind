@@ -154,7 +154,7 @@ class Settings(pydantic_settings.BaseSettings):
             object.__setattr__(self, target, value)
         if self.session_signing_key and len(self.session_signing_key) < 32:
             raise ValueError("SESSION_SIGNING_KEY must contain at least 32 characters")
-        if self.github_webhook_secret is not None and len(self.github_webhook_secret) < 16:
+        if self.github_webhook_secret and len(self.github_webhook_secret) < 16:
             raise ValueError("GITHUB_WEBHOOK_SECRET must contain at least 16 characters")
         if self.oidc_enabled and not self.oidc_issuer_url:
             raise ValueError("OIDC_ISSUER_URL is required when OIDC_ENABLED=true")
