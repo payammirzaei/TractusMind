@@ -43,10 +43,12 @@ async def github_webhook(request: Request) -> dict[str, object]:
             detail="Missing X-GitHub-Delivery header",
         )
 
+    delivery_key = _delivery_key(delivery_id)
     # GitHub can retry deliveries. Claim the delivery id before doing any work so
-    # a replay never creates duplicate queue traffic.
+    # concurrent replays never create duplicate queue traffic. Failures delete the
+    # claim again so GitHub's retry remains useful instead of silently losing work.
     claimed = await request.app.state.redis.set(
-        _delivery_key(delivery_id),
+        delivery_key,
         "1",
         ex=settings.github_webhook_delivery_ttl_seconds,
         nx=True,
@@ -78,11 +80,17 @@ async def github_webhook(request: Request) -> dict[str, object]:
     try:
         payload = json.loads(body)
     except json.JSONDecodeError as exc:
-        await request.app.state.redis.delete(_delivery_key(delivery_id))
+        await request.app.state.redis.delete(delivery_key)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid GitHub webhook JSON",
         ) from exc
+    if not isinstance(payload, dict):
+        await request.app.state.redis.delete(delivery_key)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="GitHub webhook JSON must be an object",
+        )
 
     if payload.get("deleted") is True:
         return {
@@ -95,10 +103,16 @@ async def github_webhook(request: Request) -> dict[str, object]:
         }
 
     repository = payload.get("repository") or {}
+    if not isinstance(repository, dict):
+        await request.app.state.redis.delete(delivery_key)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="GitHub push payload has an invalid repository object",
+        )
     repository_full_name = str(repository.get("full_name") or "")
     push_ref = str(payload.get("ref") or "")
     if not repository_full_name or not push_ref:
-        await request.app.state.redis.delete(_delivery_key(delivery_id))
+        await request.app.state.redis.delete(delivery_key)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="GitHub push payload is missing repository.full_name or ref",
@@ -110,10 +124,21 @@ async def github_webhook(request: Request) -> dict[str, object]:
         sources=get_enabled_sources(),
     )
     queued_sources: list[str] = []
-    for source in sources:
-        sync_source_task.send(source.id)
-        QUEUE_ENQUEUED.labels(origin="github_webhook").inc()
-        queued_sources.append(source.id)
+    try:
+        for source in sources:
+            sync_source_task.send(source.id)
+            QUEUE_ENQUEUED.labels(origin="github_webhook").inc()
+            queued_sources.append(source.id)
+    except Exception:
+        await request.app.state.redis.delete(delivery_key)
+        logger.exception(
+            "github_webhook_enqueue_failed",
+            delivery_id=delivery_id,
+            repository=repository_full_name,
+            ref=push_ref,
+            queued_sources=queued_sources,
+        )
+        raise
 
     logger.info(
         "github_webhook_processed",
