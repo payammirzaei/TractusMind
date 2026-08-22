@@ -10,6 +10,7 @@ _SECRET_FILE_FIELDS = {
     "redis_url": "redis_url_file",
     "qdrant_api_key": "qdrant_api_key_file",
     "github_token": "github_token_file",
+    "github_webhook_secret": "github_webhook_secret_file",
     "llm_api_key": "llm_api_key_file",
     "session_signing_key": "session_signing_key_file",
     "ops_admin_key": "ops_admin_key_file",
@@ -62,6 +63,13 @@ class Settings(pydantic_settings.BaseSettings):
     github_token_file: str | None = None
     github_timeout_seconds: float = pydantic.Field(default=30.0, gt=0.0, le=300.0)
     github_max_attempts: int = pydantic.Field(default=4, ge=1, le=10)
+    github_webhook_secret: str | None = None
+    github_webhook_secret_file: str | None = None
+    github_webhook_delivery_ttl_seconds: int = pydantic.Field(
+        default=86_400,
+        ge=300,
+        le=604_800,
+    )
 
     llm_base_url: str | None = None
     llm_api_key: str | None = None
@@ -108,7 +116,7 @@ class Settings(pydantic_settings.BaseSettings):
     debug_exact_weight: float = pydantic.Field(default=1.5, gt=0.0, le=10.0)
     debug_hybrid_weight: float = pydantic.Field(default=1.0, gt=0.0, le=10.0)
 
-    source_sync_interval_seconds: int = pydantic.Field(default=21_600, ge=300, le=604_800)
+    source_sync_interval_seconds: int = pydantic.Field(default=300, ge=300, le=604_800)
     source_sync_lock_seconds: int = pydantic.Field(default=43_200, ge=300, le=604_800)
     ops_admin_key: str | None = None
     ops_admin_key_file: str | None = None
@@ -146,6 +154,8 @@ class Settings(pydantic_settings.BaseSettings):
             object.__setattr__(self, target, value)
         if self.session_signing_key and len(self.session_signing_key) < 32:
             raise ValueError("SESSION_SIGNING_KEY must contain at least 32 characters")
+        if self.github_webhook_secret and len(self.github_webhook_secret) < 16:
+            raise ValueError("GITHUB_WEBHOOK_SECRET must contain at least 16 characters")
         if self.oidc_enabled and not self.oidc_issuer_url:
             raise ValueError("OIDC_ISSUER_URL is required when OIDC_ENABLED=true")
         if self.oidc_enabled:

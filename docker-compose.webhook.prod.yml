@@ -1,0 +1,10 @@
+services:
+  api:
+    environment:
+      GITHUB_WEBHOOK_SECRET_FILE: /run/secrets/github_webhook_secret
+    secrets:
+      - github_webhook_secret
+
+secrets:
+  github_webhook_secret:
+    file: ./secrets/github_webhook_secret

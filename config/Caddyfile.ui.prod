@@ -19,10 +19,18 @@
         Cross-Origin-Resource-Policy "same-origin"
     }
 
-    reverse_proxy frontend:3000 {
-        health_uri /api/health
-        health_interval 30s
-        health_timeout 5s
+    # GitHub must reach FastAPI directly: this endpoint validates the raw request
+    # body against X-Hub-Signature-256 before enqueueing an ingestion job.
+    handle /v1/webhooks/github {
+        reverse_proxy api:8000
+    }
+
+    handle {
+        reverse_proxy frontend:3000 {
+            health_uri /api/health
+            health_interval 30s
+            health_timeout 5s
+        }
     }
 
     log {
