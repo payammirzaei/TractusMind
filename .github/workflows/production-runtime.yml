@@ -10,6 +10,9 @@ on:
       - "config/Caddyfile.ui.prod"
       - "scripts/production_smoke.py"
       - ".env.production.example"
+      - "app/api/routes/github_webhook.py"
+      - "app/ingestion/webhook.py"
+      - "app/core/config.py"
       - "Dockerfile"
       - "frontend/Dockerfile"
       - "docs/production-deployment.md"
@@ -71,6 +74,7 @@ jobs:
           printf '%s\n' "redis://:${redis_password}@redis:6379/0" > secrets/redis_url
           printf '%s\n' 'ci-no-provider-call' > secrets/llm_api_key
           printf '%s\n' "$CI_GITHUB_TOKEN" > secrets/github_token
+          printf '%s\n' 'ci-webhook-secret-913eb444' > secrets/github_webhook_secret
           printf '%s\n' 'ci-break-glass-admin-913eb444' > secrets/ops_admin_key
           printf '%s\n' 'ci-metrics-admin-a697de14' > secrets/metrics_admin_key
           printf '%s\n' 'ci-grafana-admin-9137fe21' > secrets/grafana_admin_password
