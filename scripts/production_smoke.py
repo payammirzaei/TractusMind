@@ -178,7 +178,10 @@ def main() -> int:
             expected=(202,),
             extra_headers=webhook_headers,
         )
-        if not isinstance(duplicate_response, dict) or duplicate_response.get("duplicate") is not True:
+        if (
+            not isinstance(duplicate_response, dict)
+            or duplicate_response.get("duplicate") is not True
+        ):
             fail(f"GitHub webhook delivery dedupe failed: {duplicate_response}")
 
         invalid_headers = {
