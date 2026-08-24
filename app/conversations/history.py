@@ -1,4 +1,3 @@
-import re
 from dataclasses import dataclass
 
 
@@ -38,58 +37,54 @@ _ANAPHORIC_WORDS = {
     "they",
     "same",
 }
-_CITATION_RE = re.compile(r"\s*\[S\d+\]")
-_RETRIEVAL_CONTEXT_TURNS = 2
-_RETRIEVAL_ANSWER_CHARS = 1_200
-_ROUTING_CONTEXT_TURNS = 2
+_ASSESSMENT_TERMS = (
+    "hardest part",
+    "most difficult",
+    "main challenge",
+    "biggest challenge",
+    "most challenging",
+)
+_TOPIC_CHARS = 1_000
 
 
 def retrieval_question(question: str, history: list[ConversationTurn]) -> str:
-    """Resolve conversational follow-ups into a retrieval query with recent topic context.
+    """Resolve a follow-up against the stable user topic instead of rolling answer text.
 
-    Retrieval benefits from recent assistant answers because those answers often contain the
-    concrete entities and concepts hidden behind follow-ups such as "what else should I know?".
-    Keep the context small and citation-free so it helps semantic search without turning the
-    entire conversation into the query.
+    Assistant answers are useful to the generator but are noisy retrieval input: a long answer
+    about benefits, releases, or versions can pull the next follow-up away from the user's
+    original task. For retrieval, anchor the chain to the most recent standalone user question
+    and combine it with the current follow-up. This keeps third, fourth, and later turns on topic.
     """
 
     normalized = question.strip()
     if not history or not _needs_context(normalized):
         return normalized
 
-    lines = ["Recent conversation context for retrieval:"]
-    for turn in history[-_RETRIEVAL_CONTEXT_TURNS:]:
-        previous_question = _compact(turn.question, 800)
-        previous_answer = _retrieval_answer(turn.answer)
-        if previous_question:
-            lines.append(f"Previous user question: {previous_question}")
-        if previous_answer:
-            lines.append(f"Previous assistant answer: {previous_answer}")
-    lines.append(f"Current question: {normalized}")
+    anchor = _topic_anchor(history)
+    lines = [
+        f"Conversation topic: {_compact(anchor, _TOPIC_CHARS)}",
+        f"Current question: {normalized}",
+    ]
+    if _is_assessment(normalized):
+        lines.append(
+            "Retrieval focus: implementation challenges, prerequisites, deployment, "
+            "configuration, operations, security, identity, connector setup, and maintenance."
+        )
     return "\n".join(lines)
 
 
 def routing_question(question: str, history: list[ConversationTurn]) -> str:
-    """Build routing context without assistant-answer vocabulary pollution.
-
-    The deterministic router looks for high-signal words such as "version", "release", "EDC",
-    and "connector". Feeding previous assistant answers into it can accidentally route a generic
-    follow-up to the wrong domain just because an earlier answer happened to contain one of those
-    words. For follow-ups, use recent *user questions only* to preserve topic continuity while
-    keeping routing intent clean.
-    """
+    """Route follow-ups using the stable user topic and no assistant-answer vocabulary."""
 
     normalized = question.strip()
     if not history or not _needs_context(normalized):
         return normalized
 
-    lines = ["Recent user context for routing:"]
-    for turn in history[-_ROUTING_CONTEXT_TURNS:]:
-        previous_question = _compact(turn.question, 800)
-        if previous_question:
-            lines.append(f"Previous user question: {previous_question}")
-    lines.append(f"Current question: {normalized}")
-    return "\n".join(lines)
+    anchor = _topic_anchor(history)
+    return (
+        f"Conversation topic: {_compact(anchor, _TOPIC_CHARS)}\n"
+        f"Current question: {normalized}"
+    )
 
 
 def format_history(history: list[ConversationTurn]) -> str:
@@ -102,13 +97,21 @@ def format_history(history: list[ConversationTurn]) -> str:
     return "\n".join(lines)
 
 
+def _topic_anchor(history: list[ConversationTurn]) -> str:
+    for turn in reversed(history):
+        candidate = turn.question.strip()
+        if candidate and not _needs_context(candidate):
+            return candidate
+    return history[0].question.strip()
+
+
 def _compact(text: str, limit: int) -> str:
     return " ".join(text.split())[:limit]
 
 
-def _retrieval_answer(answer: str) -> str:
-    without_citations = _CITATION_RE.sub("", answer)
-    return _compact(without_citations, _RETRIEVAL_ANSWER_CHARS)
+def _is_assessment(question: str) -> bool:
+    lowered = question.casefold()
+    return any(term in lowered for term in _ASSESSMENT_TERMS)
 
 
 def _needs_context(question: str) -> bool:
