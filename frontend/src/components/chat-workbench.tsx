@@ -6,7 +6,6 @@ import {
   ArrowUp,
   Check,
   CheckCircle2,
-  Clock3,
   Copy,
   CornerDownLeft,
   ExternalLink,
@@ -88,15 +87,6 @@ function AnswerBody({ payload, onCitation }: { payload: GroundedAnswer; onCitati
   );
 }
 
-function HistoricalAnswer({ text }: { text: string }) {
-  return (
-    <div className="space-y-3">
-      <div className="whitespace-pre-wrap text-[15px] leading-7 text-slate-300">{text}</div>
-      <Badge className="text-slate-500"><Clock3 className="size-3" /> historical turn · provenance not rehydrated</Badge>
-    </div>
-  );
-}
-
 function Score({ label, value }: { label: string; value?: number | null }) {
   const normalized = value == null ? 0 : Math.max(0, Math.min(1, value));
   return (
@@ -122,7 +112,7 @@ function Inspector({ citation, answer }: { citation: AnswerCitation | null; answ
           <div className="m-auto max-w-[250px] text-center">
             <div className="tm-orb mx-auto mb-5 grid size-14 place-items-center rounded-2xl"><Search className="size-5 text-cyan-200" /></div>
             <div className="text-sm font-semibold text-slate-200">Open an evidence marker</div>
-            <p className="mt-2 text-xs leading-5 text-slate-600">Every live citation exposes repository, immutable commit, file range, retrieval path and claim verification.</p>
+            <p className="mt-2 text-xs leading-5 text-slate-600">Every citation exposes repository, immutable commit, file range, retrieval path and claim verification.</p>
           </div>
         ) : (
           <div className="tm-scrollbar space-y-5 overflow-y-auto pr-1">
@@ -217,16 +207,22 @@ function SessionDrawer({
 }) {
   if (!open) return null;
   return (
-    <motion.aside initial={{ x: -24, opacity: 0 }} animate={{ x: 0, opacity: 1 }} className="tm-shell absolute bottom-[92px] left-3 top-[54px] z-30 flex w-[300px] flex-col rounded-2xl p-3 shadow-2xl">
+    <motion.aside initial={{ x: -24, opacity: 0 }} animate={{ x: 0, opacity: 1 }} className="tm-shell absolute bottom-[92px] left-3 top-[54px] z-30 flex w-[320px] flex-col rounded-2xl p-3 shadow-2xl">
       <div className="mb-3 flex items-center justify-between"><div><div className="tm-label">Session memory</div><div className="mt-1 text-sm font-semibold">Owned conversations</div></div><Button variant="ghost" size="icon" onClick={onClose}><X className="size-4"/></Button></div>
       <Button variant="primary" size="sm" onClick={onNew}><MessageSquarePlus className="size-3.5"/>New conversation</Button>
-      <div className="tm-scrollbar mt-3 min-h-0 flex-1 space-y-1 overflow-y-auto">
+      <div className="tm-scrollbar mt-3 min-h-0 flex-1 space-y-1.5 overflow-y-auto">
         {loading && <div className="p-4 text-center tm-label">loading sessions</div>}
         {!loading && items.length === 0 && <div className="p-5 text-center text-xs leading-5 text-slate-600">No owned conversations yet.</div>}
         {items.map((item) => (
-          <button key={item.conversation_id} onClick={() => onOpen(item.conversation_id)} className={`w-full rounded-xl border px-3 py-3 text-left transition ${currentId === item.conversation_id ? "border-cyan-300/15 bg-cyan-300/[.06]" : "border-white/[.035] bg-white/[.018] hover:bg-white/[.04]"}`}>
-            <div className="flex items-center gap-2"><span className={`tm-led ${currentId === item.conversation_id ? "cyan" : ""}`}/><span className="tm-mono text-[10px] text-slate-300">{shortSha(item.conversation_id, 12)}</span></div>
-            <div className="mt-2 text-[10px] text-slate-600">updated {formatDate(item.updated_at)}</div>
+          <button key={item.conversation_id} title={item.title} onClick={() => onOpen(item.conversation_id)} className={`w-full rounded-xl border px-3 py-3 text-left transition ${currentId === item.conversation_id ? "border-cyan-300/15 bg-cyan-300/[.06]" : "border-white/[.035] bg-white/[.018] hover:bg-white/[.04]"}`}>
+            <div className="flex items-start gap-2.5">
+              <span className={`tm-led mt-1.5 shrink-0 ${currentId === item.conversation_id ? "cyan" : ""}`}/>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-xs font-semibold leading-5 text-slate-200">{item.title || `Conversation ${shortSha(item.conversation_id, 8)}`}</div>
+                {item.preview && <div className="mt-1 line-clamp-2 text-[10px] leading-4 text-slate-500">{item.preview}</div>}
+                <div className="mt-2 flex items-center gap-2 text-[9px] text-slate-600"><span>{item.turn_count ?? 0} turns</span><span>·</span><span>{formatDate(item.updated_at)}</span></div>
+              </div>
+            </div>
           </button>
         ))}
       </div>
@@ -313,7 +309,7 @@ export function ChatWorkbench() {
       const history = payload as ConversationHistory;
       const restored: ChatMessage[] = history.turns.flatMap((turn) => [
         { id: crypto.randomUUID(), role: "user" as const, text: turn.question },
-        { id: crypto.randomUUID(), role: "assistant" as const, text: turn.answer, historical: true },
+        { id: crypto.randomUUID(), role: "assistant" as const, text: turn.answer, payload: turn, historical: true },
       ]);
       setMessages(restored);
       setConversationId(history.conversation_id);
@@ -413,7 +409,7 @@ export function ChatWorkbench() {
                   <div className="flex items-center gap-2"><span className={`tm-led ${message.historical ? "" : "cyan"}`} /><span className="tm-label">TractusMind</span>{message.payload && <span className="hidden font-mono text-[9px] text-slate-700 sm:inline">{message.payload.interaction_id ? shortSha(message.payload.interaction_id, 10) : "live"}</span>}</div>
                   {hasPayload(message) && <Button size="sm" variant="ghost" className="opacity-60 transition group-hover:opacity-100" aria-label="Copy answer" onClick={() => void copyAnswer(message)}>{copiedAnswer === message.id ? <Check className="size-3.5 text-emerald-300"/> : <Copy className="size-3.5"/>}</Button>}
                 </div>
-                {message.payload ? <AnswerBody payload={message.payload} onCitation={setSelectedCitation} /> : <HistoricalAnswer text={message.text} />}
+                {message.payload ? <AnswerBody payload={message.payload} onCitation={setSelectedCitation} /> : <div className="whitespace-pre-wrap text-[15px] leading-7 text-slate-300">{message.text}</div>}
                 {message.payload && <div className="mt-3 flex items-center gap-1"><span className="mr-1 text-[9px] uppercase tracking-[.12em] text-slate-700">signal</span><Button size="sm" variant="ghost" aria-label="Useful answer" onClick={() => void rate(message.payload!, "up")} className={feedback[message.payload.interaction_id ?? ""] === "up" ? "text-emerald-300" : ""}><ThumbsUp className="size-3.5" /></Button><Button size="sm" variant="ghost" aria-label="Poor answer" onClick={() => void rate(message.payload!, "down")} className={feedback[message.payload.interaction_id ?? ""] === "down" ? "text-red-300" : ""}><ThumbsDown className="size-3.5" /></Button></div>}
               </motion.div>
             ))}
