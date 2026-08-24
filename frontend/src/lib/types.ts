@@ -12,11 +12,9 @@ export interface ConversationSummary {
   conversation_id: string;
   created_at: string;
   updated_at: string;
-}
-
-export interface ConversationHistory {
-  conversation_id: string;
-  turns: Array<{ question: string; answer: string }>;
+  title: string;
+  preview?: string | null;
+  turn_count: number;
 }
 
 export interface QueryRoute {
@@ -71,6 +69,11 @@ export interface GroundedAnswer {
   verification?: VerificationReport | null;
   route?: QueryRoute | null;
   model?: string | null;
+}
+
+export interface ConversationHistory {
+  conversation_id: string;
+  turns: GroundedAnswer[];
 }
 
 export interface SourceStatus {
