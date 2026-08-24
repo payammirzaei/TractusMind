@@ -23,7 +23,14 @@ because the citation is not repeated after every atomic fragment.
 For each claim, copy the citation IDs that support that claim when they are clear from the answer.
 Prefer citation IDs already present in the answer. Do not add an evidence ID merely because it
 also supports the claim if the answer did not cite that ID.
-A claim is supported only when the cited evidence directly supports it.
+A direct factual claim is supported only when the cited evidence directly supports it.
+For clearly labeled analytical synthesis (for example "based on these prerequisites, X appears
+more operationally demanding"), do not require the evidence to contain the exact evaluative word
+such as "hardest". Mark the synthesis supported when every factual premise is directly supported
+by the cited evidence, the conclusion is a conservative and reasonable comparison of those
+premises, and the answer clearly presents it as an inference rather than a documented fact.
+Unlabeled speculation, strong conclusions that go beyond the evidence, or claims that say the
+documentation explicitly ranks something when it does not must be marked unsupported.
 Do not invent citation IDs.
 If a claim has no adequate cited evidence, mark supported false.
 Return exactly one JSON object and no markdown fence:
