@@ -5,19 +5,25 @@ from app.retrieval.models import RetrievalHit
 from app.routing.models import QueryRoute
 
 
-def _hit(*, score: float = 0.8) -> RetrievalHit:
+def _hit(
+    *,
+    score: float = 0.8,
+    chunk_id: str = "chunk-1",
+    text: str = "The SDK connector service can create an asset with create_asset.",
+    path: str = "tractusx_sdk/connector.py",
+) -> RetrievalHit:
     return RetrievalHit(
-        chunk_id="chunk-1",
+        chunk_id=chunk_id,
         score=score,
         retrieval_score=0.03,
         rerank_score=score,
-        text="The SDK connector service can create an asset with create_asset.",
+        text=text,
         source_id="tractusx-sdk",
         repository="eclipse-tractusx/tractusx-sdk",
         component="sdk",
         version_ref="main",
         commit_sha="a" * 40,
-        path="tractusx_sdk/connector.py",
+        path=path,
         content_type="code",
         language="python",
         kind="code_symbol",
@@ -25,7 +31,7 @@ def _hit(*, score: float = 0.8) -> RetrievalHit:
         end_line=20,
         symbol="create_asset",
         parent_symbol="ConnectorService",
-        source_url="https://github.com/example/repo/blob/commit/file.py#L10-L20",
+        source_url=f"https://github.com/example/repo/blob/commit/{path}#L10-L20",
     )
 
 
@@ -117,6 +123,34 @@ async def test_grounded_answer_ignores_extra_declared_citation_metadata() -> Non
     assert answer.grounded is True
     assert answer.abstained is False
     assert [citation.citation_id for citation in answer.citations] == ["S1"]
+
+
+async def test_verifier_ignores_extra_valid_evidence_when_inline_support_exists() -> None:
+    service = _service(
+        [
+            _hit(),
+            _hit(
+                chunk_id="chunk-2",
+                text="The SDK documentation also describes connector asset operations.",
+                path="docs/assets.md",
+            ),
+        ],
+        '{"answer":"Use create_asset [S1].","citation_ids":["S1"],"grounded":true}',
+        (
+            '{"claims":[{"claim":"Use create_asset.",'
+            '"citation_ids":["S1","S2"],"supported":true,'
+            '"reason":"S1 directly supports the claim; S2 is additional support."}],'
+            '"all_supported":true}'
+        ),
+    )
+
+    answer = await service.answer("How do I create an asset with the SDK?")
+
+    assert answer.grounded is True
+    assert answer.abstained is False
+    assert answer.verification is not None
+    assert answer.verification.passed is True
+    assert answer.verification.claims[0].citation_ids == ["S1"]
 
 
 async def test_answer_abstains_when_claim_is_unsupported() -> None:
