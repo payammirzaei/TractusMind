@@ -81,8 +81,11 @@ class Settings(pydantic_settings.BaseSettings):
     llm_max_tokens: int = pydantic.Field(default=1_500, ge=128, le=16_384)
     generation_context_max_chars: int = pydantic.Field(default=24_000, ge=1_000, le=200_000)
     verification_max_claims: int = pydantic.Field(default=12, ge=1, le=50)
-    history_max_turns: int = pydantic.Field(default=6, ge=1, le=20)
-    history_max_chars: int = pydantic.Field(default=6_000, ge=500, le=30_000)
+    # Conversation intelligence condenses this wider window into a compact semantic state before
+    # retrieval/generation, so we can retain the user's overarching goal without sending the full
+    # transcript to every generation call.
+    history_max_turns: int = pydantic.Field(default=16, ge=1, le=20)
+    history_max_chars: int = pydantic.Field(default=16_000, ge=500, le=30_000)
 
     session_signing_key: str | None = None
     session_signing_key_file: str | None = None
