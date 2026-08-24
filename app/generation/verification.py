@@ -21,6 +21,8 @@ A citation placed at the end of a sentence, bullet, or short paragraph may suppo
 claims in that same sentence, bullet, or paragraph. Do not reject a supported claim merely
 because the citation is not repeated after every atomic fragment.
 For each claim, copy the citation IDs that support that claim when they are clear from the answer.
+Prefer citation IDs already present in the answer. Do not add an evidence ID merely because it
+also supports the claim if the answer did not cite that ID.
 A claim is supported only when the cited evidence directly supports it.
 Do not invent citation IDs.
 If a claim has no adequate cited evidence, mark supported false.
@@ -66,13 +68,25 @@ class ClaimVerifier:
         invalid_claim_citations = False
         for claim in claims:
             claim_ids = set(claim.citation_ids)
-            # The answer itself has already passed the strict inline-citation gate. The
-            # verifier may omit a repeated citation when splitting one cited sentence into
-            # multiple atomic claims, so an empty echo is not by itself a grounding failure.
-            if claim_ids - valid_ids:
+            unknown_ids = claim_ids - valid_ids
+            if unknown_ids:
                 invalid_claim_citations = True
                 claim.supported = False
-            if claim_ids - answer_ids:
+                continue
+
+            # The verifier occasionally adds another *valid* evidence ID that also supports a
+            # claim even though the generated answer did not cite that ID inline. That is noisy
+            # verifier metadata, not evidence that the answer is ungrounded. Keep only the
+            # verifier IDs that were actually cited by the answer. If at least one inline ID
+            # remains, verification can continue normally; if none remain, reject the claim.
+            inline_claim_ids = claim_ids & answer_ids
+            if claim_ids and inline_claim_ids:
+                claim.citation_ids = [
+                    citation_id
+                    for citation_id in claim.citation_ids
+                    if citation_id in inline_claim_ids
+                ]
+            elif claim_ids and not inline_claim_ids:
                 invalid_claim_citations = True
                 claim.supported = False
 
