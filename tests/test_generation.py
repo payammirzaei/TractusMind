@@ -101,6 +101,24 @@ async def test_grounded_answer_passes_claim_verification() -> None:
     assert answer.verification.passed is True
 
 
+async def test_grounded_answer_ignores_extra_declared_citation_metadata() -> None:
+    service = _service(
+        [_hit()],
+        '{"answer":"Use create_asset [S1].","citation_ids":["S1","S2"],"grounded":true}',
+        (
+            '{"claims":[{"claim":"Use create_asset.",'
+            '"citation_ids":["S1"],"supported":true,"reason":"Directly supported."}],'
+            '"all_supported":true}'
+        ),
+    )
+
+    answer = await service.answer("How do I create an asset with the SDK?")
+
+    assert answer.grounded is True
+    assert answer.abstained is False
+    assert [citation.citation_id for citation in answer.citations] == ["S1"]
+
+
 async def test_answer_abstains_when_claim_is_unsupported() -> None:
     service = _service(
         [_hit()],
