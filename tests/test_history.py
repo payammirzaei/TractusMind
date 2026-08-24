@@ -1,4 +1,9 @@
-from app.conversations.history import ConversationTurn, format_history, retrieval_question
+from app.conversations.history import (
+    ConversationTurn,
+    format_history,
+    retrieval_question,
+    routing_question,
+)
 
 
 def _history() -> list[ConversationTurn]:
@@ -44,16 +49,37 @@ def test_follow_up_keeps_two_recent_turns_when_last_answer_is_unhelpful() -> Non
     assert "What is the hardest part?" in query
 
 
+def test_routing_follow_up_uses_user_context_but_not_assistant_vocabulary() -> None:
+    history = [
+        ConversationTurn(
+            question="I want to run Tractus-X on my server. What do I need?",
+            answer=(
+                "Use Ubuntu version 22.04 and install the required tools. "
+                "Check the release documentation [S1]."
+            ),
+        )
+    ]
+
+    query = routing_question("What is the hardest part of this process?", history)
+
+    assert "run Tractus-X on my server" in query
+    assert "hardest part of this process" in query
+    assert "Ubuntu version" not in query
+    assert "release documentation" not in query
+
+
 def test_explicit_new_question_does_not_inherit_previous_retrieval_context() -> None:
     question = "Explain the EDC control plane and data plane architecture in detail."
 
     assert retrieval_question(question, _history()) == question
+    assert routing_question(question, _history()) == question
 
 
 def test_short_standalone_question_does_not_inherit_previous_context() -> None:
     question = "Explain EDC control plane."
 
     assert retrieval_question(question, _history()) == question
+    assert routing_question(question, _history()) == question
 
 
 def test_anaphoric_follow_up_uses_previous_user_question() -> None:
