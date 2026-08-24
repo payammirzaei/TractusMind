@@ -17,6 +17,33 @@ def test_follow_up_uses_previous_user_question_for_retrieval() -> None:
     assert "What about contracts?" in query
 
 
+def test_follow_up_uses_previous_answer_for_topic_resolution() -> None:
+    query = retrieval_question("What else should I know about it?", _history())
+
+    assert "Previous assistant answer: Use the asset service." in query
+    assert "[S1]" not in query
+    assert "What else should I know about it?" in query
+
+
+def test_follow_up_keeps_two_recent_turns_when_last_answer_is_unhelpful() -> None:
+    history = [
+        ConversationTurn(
+            question="How hard is it to run Tractus-X in a small company?",
+            answer="You need deployment, identity, connector and operations knowledge [S1].",
+        ),
+        ConversationTurn(
+            question="What else should I know about it?",
+            answer="I don't have enough grounded Tractus-X evidence to answer this reliably.",
+        ),
+    ]
+
+    query = retrieval_question("What is the hardest part?", history)
+
+    assert "small company" in query
+    assert "deployment, identity, connector and operations knowledge" in query
+    assert "What is the hardest part?" in query
+
+
 def test_explicit_new_question_does_not_inherit_previous_retrieval_context() -> None:
     question = "Explain the EDC control plane and data plane architecture in detail."
 
