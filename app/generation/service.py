@@ -142,10 +142,10 @@ class GroundedAnswerService:
             citation_id for citation_id in declared_ordered if citation_id not in citation_map
         ]
 
-        # Some otherwise-grounded model responses correctly declare their evidence IDs in
-        # citation_ids but omit the same IDs from answer text. That is a formatting defect,
-        # not an evidence defect. Add the valid declared IDs without changing factual content,
-        # then let the independent ClaimVerifier decide whether those claims are supported.
+        # When the model forgets inline citations completely, a fully-valid citation_ids list
+        # can repair the formatting defect. Once inline citations exist, however, they are the
+        # source of truth: extra or stale citation_ids metadata must not discard an otherwise
+        # grounded answer. The independent ClaimVerifier still checks every factual claim.
         if not cited_ids and declared_ordered and not declared_invalid:
             payload.answer = (
                 f"{payload.answer.rstrip()} "
@@ -158,12 +158,10 @@ class GroundedAnswerService:
                 citation_ids=declared_ordered,
             )
 
-        inline_ids = set(cited_ids)
-        declared_ids = set(declared_ordered)
         invalid_ids = [
             citation_id for citation_id in cited_ids if citation_id not in citation_map
         ]
-        if invalid_ids or declared_invalid or not cited_ids or declared_ids != inline_ids:
+        if invalid_ids or not cited_ids:
             ANSWERS.labels(intent=intent, outcome="abstained_citation_gate").inc()
             logger.info(
                 "answer_abstained",
@@ -180,6 +178,17 @@ class GroundedAnswerService:
                 evidence_count=len(context.blocks),
                 route=route,
             )
+
+        inline_ordered = list(dict.fromkeys(cited_ids))
+        if declared_ordered != inline_ordered:
+            logger.info(
+                "answer_citation_metadata_normalized",
+                intent=intent,
+                inline_ids=inline_ordered,
+                declared_ids=declared_ordered,
+                declared_invalid=declared_invalid,
+            )
+            payload.citation_ids = inline_ordered
 
         with observe_stage("verification", intent):
             verification = await self.verifier.verify(
