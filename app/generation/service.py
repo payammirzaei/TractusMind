@@ -4,7 +4,12 @@ import re
 import structlog
 from pydantic import ValidationError
 
-from app.conversations.history import ConversationTurn, format_history, retrieval_question
+from app.conversations.history import (
+    ConversationTurn,
+    format_history,
+    retrieval_question,
+    routing_question,
+)
 from app.generation.context import GroundedContext, build_grounded_context
 from app.generation.llm import LLMGenerationError, LLMProvider
 from app.generation.models import GroundedAnswer, LLMAnswerPayload, VerificationReport
@@ -72,13 +77,15 @@ class GroundedAnswerService:
 
         turns = history or []
         search_question = retrieval_question(normalized, turns)
-        route = self.router.route(search_question)
+        route_question = routing_question(normalized, turns)
+        route = self.router.route(route_question)
         intent = route.intent.value
         record_trace_metadata("route", route.model_dump(mode="json"))
         record_trace_metadata("intent", intent)
         record_trace_metadata("model", self.llm.model_name)
         record_trace_metadata("history_turns", len(turns))
         record_trace_metadata("history_context_used", search_question != normalized)
+        record_trace_metadata("routing_context_used", route_question != normalized)
 
         with observe_stage("retrieval", intent):
             hits = await self.retrieval.search(
