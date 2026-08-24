@@ -1,3 +1,4 @@
+from app.conversations.history import ConversationTurn
 from app.generation.context import build_grounded_context
 from app.generation.service import GroundedAnswerService
 from app.generation.verification import ClaimVerifier
@@ -39,6 +40,7 @@ class FakeRetrieval:
     def __init__(self, hits: list[RetrievalHit]) -> None:
         self.hits = hits
         self.last_route: QueryRoute | None = None
+        self.last_query: str | None = None
 
     async def search(
         self,
@@ -47,6 +49,7 @@ class FakeRetrieval:
         limit: int = 6,
         route: QueryRoute | None = None,
     ) -> list[RetrievalHit]:
+        self.last_query = query
         self.last_route = route
         return self.hits[:limit]
 
@@ -213,3 +216,55 @@ async def test_answer_abstains_before_llm_when_no_evidence() -> None:
     assert answer.abstained is True
     assert answer.evidence_count == 0
     assert answer.route is not None
+
+
+async def test_semantic_conversation_state_resolves_third_turn_follow_up() -> None:
+    resolved_question = (
+        "For a small company adopting Tractus-X, what documented implementation and operational "
+        "requirements appear most demanding, and does the documentation explicitly rank them?"
+    )
+    service = _service(
+        [
+            _hit(
+                text=(
+                    "Running the environment requires Linux administration, container tooling, "
+                    "cluster configuration, and operational permissions."
+                ),
+                path="docs/environment.md",
+            )
+        ],
+        (
+            '{"relation":"continuation","topic":"Adopting Tractus-X for a small company",'
+            '"goal":"Evaluate feasibility, benefits, and implementation effort",'
+            '"constraints":["small company"],"discussed":["adoption","benefits"],'
+            '"current_focus":"implementation difficulty",'
+            f'"standalone_question":"{resolved_question}","confidence":0.98}}'
+        ),
+        (
+            '{"answer":"The documentation does not explicitly rank difficulty. Based on the '
+            'documented prerequisites, infrastructure and operational setup appear demanding '
+            '[S1].","citation_ids":["S1"],"grounded":true}'
+        ),
+        (
+            '{"claims":[{"claim":"The documentation does not explicitly rank difficulty and '
+            'the cited prerequisites support a cautious operational-difficulty synthesis.",'
+            '"citation_ids":["S1"],"supported":true,"reason":"Cautious synthesis."}],'
+            '"all_supported":true}'
+        ),
+    )
+    history = [
+        ConversationTurn(
+            question="How can I have Tractus-X for my small company?",
+            answer="Tractus-X includes SME-oriented adoption options [S1].",
+        ),
+        ConversationTurn(
+            question="What is the benefit?",
+            answer="It can support interoperable collaboration and data sharing [S2].",
+        ),
+    ]
+
+    answer = await service.answer("what is the hardest part", history=history)
+
+    assert answer.grounded is True
+    assert answer.question == "what is the hardest part"
+    assert service.retrieval.last_query == resolved_question  # type: ignore[attr-defined]
