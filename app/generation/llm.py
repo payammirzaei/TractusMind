@@ -200,6 +200,7 @@ class OpenAICompatibleLLM:
             if self.json_mode and finish_reason == "length":
                 if attempt < self.max_attempts:
                     json_retry = True
+                    idempotency_key = str(uuid4())
                     await self._retry(
                         attempt=attempt,
                         operation=operation,
@@ -218,6 +219,7 @@ class OpenAICompatibleLLM:
                 except json.JSONDecodeError as exc:
                     if attempt < self.max_attempts:
                         json_retry = True
+                        idempotency_key = str(uuid4())
                         await self._retry(
                             attempt=attempt,
                             operation=operation,
