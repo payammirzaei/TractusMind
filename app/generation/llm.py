@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import json
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 from uuid import uuid4
@@ -37,6 +38,11 @@ class LLMProvider(Protocol):
 
 
 _RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
+_JSON_RETRY_INSTRUCTION = (
+    "\n\nYour previous response could not be accepted as complete JSON. "
+    "Return one compact valid JSON object only, with no markdown or prose outside it. "
+    "Keep the response concise enough to finish within the token limit."
+)
 
 
 class OpenAICompatibleLLM:
@@ -54,6 +60,7 @@ class OpenAICompatibleLLM:
         retry_max_seconds: float = 8.0,
         circuit_failure_threshold: int = 3,
         circuit_cooldown_seconds: float = 30.0,
+        json_mode: bool = False,
         transport: httpx.AsyncBaseTransport | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
@@ -70,6 +77,7 @@ class OpenAICompatibleLLM:
         self.max_attempts = max_attempts
         self.retry_base_seconds = retry_base_seconds
         self.retry_max_seconds = retry_max_seconds
+        self.json_mode = json_mode
         self._sleep = sleep
         scope_source = f"{base_url.rstrip('/')}|{model_name}".encode()
         self._breaker = shared_provider_circuit(
@@ -105,20 +113,29 @@ class OpenAICompatibleLLM:
         idempotency_key = str(uuid4())
         transient_error: Exception | None = None
         transient_reason = "unknown"
+        json_retry = False
         for attempt in range(1, self.max_attempts + 1):
+            request_system_prompt = system_prompt
+            if self.json_mode and json_retry:
+                request_system_prompt += _JSON_RETRY_INSTRUCTION
+
+            request_payload: dict[str, object] = {
+                "model": self.model_name,
+                "messages": [
+                    {"role": "system", "content": request_system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": self.temperature,
+                "max_tokens": self.max_tokens,
+            }
+            if self.json_mode:
+                request_payload["response_format"] = {"type": "json_object"}
+
             try:
                 response = await self._client.post(
                     "chat/completions",
                     headers={"Idempotency-Key": idempotency_key},
-                    json={
-                        "model": self.model_name,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt},
-                        ],
-                        "temperature": self.temperature,
-                        "max_tokens": self.max_tokens,
-                    },
+                    json=request_payload,
                 )
             except httpx.TransportError as exc:
                 transient_error = exc
@@ -166,7 +183,9 @@ class OpenAICompatibleLLM:
             await self._breaker.record_success()
             try:
                 payload = response.json()
-                content = payload["choices"][0]["message"]["content"]
+                choice = payload["choices"][0]
+                content = choice["message"]["content"]
+                finish_reason = choice.get("finish_reason")
             except (KeyError, IndexError, TypeError, ValueError) as exc:
                 PROVIDER_REQUESTS.labels(
                     provider="llm", operation=operation, outcome="invalid_response"
@@ -177,6 +196,41 @@ class OpenAICompatibleLLM:
                     provider="llm", operation=operation, outcome="invalid_response"
                 ).inc()
                 raise LLMGenerationError("LLM returned empty content")
+
+            if self.json_mode and finish_reason == "length":
+                if attempt < self.max_attempts:
+                    json_retry = True
+                    idempotency_key = str(uuid4())
+                    await self._retry(
+                        attempt=attempt,
+                        operation=operation,
+                        reason="truncated_json",
+                        retry_after=None,
+                    )
+                    continue
+                PROVIDER_REQUESTS.labels(
+                    provider="llm", operation=operation, outcome="invalid_response"
+                ).inc()
+                raise LLMGenerationError("LLM JSON response was truncated by token limit")
+
+            if self.json_mode:
+                try:
+                    json.loads(content)
+                except json.JSONDecodeError as exc:
+                    if attempt < self.max_attempts:
+                        json_retry = True
+                        idempotency_key = str(uuid4())
+                        await self._retry(
+                            attempt=attempt,
+                            operation=operation,
+                            reason="invalid_json",
+                            retry_after=None,
+                        )
+                        continue
+                    PROVIDER_REQUESTS.labels(
+                        provider="llm", operation=operation, outcome="invalid_response"
+                    ).inc()
+                    raise LLMGenerationError("LLM returned invalid JSON content") from exc
 
             PROVIDER_REQUESTS.labels(
                 provider="llm", operation=operation, outcome="success"

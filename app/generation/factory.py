@@ -29,6 +29,7 @@ def create_grounded_answer_service(
         retry_max_seconds=settings.provider_retry_max_seconds,
         circuit_failure_threshold=settings.provider_circuit_failure_threshold,
         circuit_cooldown_seconds=settings.provider_circuit_cooldown_seconds,
+        json_mode=True,
     )
     verifier = ClaimVerifier(
         llm,
