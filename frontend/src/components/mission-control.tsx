@@ -140,7 +140,7 @@ function LoginConsole({ onReady, returnTo }: { onReady: (identity: Identity) => 
             <label className="tm-label mb-2 block">Username</label>
             <div className="tm-well flex items-center gap-2 rounded-xl p-2">
               <Users className="ml-2 size-4 text-slate-600"/>
-              <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="payam" autoComplete="username" className="min-w-0 flex-1 bg-transparent px-2 py-2 text-sm outline-none placeholder:text-slate-700"/>
+              <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="username" autoComplete="username" className="min-w-0 flex-1 bg-transparent px-2 py-2 text-sm outline-none placeholder:text-slate-700"/>
             </div>
             <label className="tm-label mb-2 mt-4 block">Password</label>
             <div className="tm-well flex items-center gap-2 rounded-xl p-2">
