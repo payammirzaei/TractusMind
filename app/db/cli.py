@@ -21,7 +21,7 @@ CORE_BASELINE_TABLES = {
     "quality_review",
     "regression_case",
 }
-MANAGED_TABLES = CORE_BASELINE_TABLES | {"app_user"}
+MANAGED_TABLES = CORE_BASELINE_TABLES | {"app_user", "activity_log"}
 
 
 def _config() -> Config:

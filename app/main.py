@@ -7,6 +7,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from app.activity import ActivityStore
+from app.api.routes.activity import ops_router as activity_ops_router
+from app.api.routes.activity import router as activity_router
 from app.api.routes.ask import router as ask_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.conversations import router as conversations_router
@@ -52,6 +55,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.redis = create_redis_client(settings)
     app.state.qdrant = create_qdrant_client(settings)
     app.state.auth_store = AuthStore(app.state.postgres)
+    app.state.activity_store = ActivityStore(app.state.postgres)
     app.state.oidc_auth = (
         OIDCAuthenticator(settings, app.state.auth_store) if settings.oidc_enabled else None
     )
@@ -92,6 +96,8 @@ app = FastAPI(
 )
 app.include_router(health_router)
 app.include_router(auth_router)
+app.include_router(activity_router)
+app.include_router(activity_ops_router)
 app.include_router(ask_router)
 app.include_router(conversations_router)
 app.include_router(feedback_router)

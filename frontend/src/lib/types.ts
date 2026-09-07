@@ -125,6 +125,25 @@ export interface RunStatus {
   finished_at?: string | null;
 }
 
+export interface ActivityEvent {
+  event_id: string;
+  event_type: "page_view" | "click" | "http_request";
+  user_id?: string | null;
+  session_id?: string | null;
+  visitor_id?: string | null;
+  request_id?: string | null;
+  ip_address?: string | null;
+  method?: string | null;
+  path: string;
+  status_code?: number | null;
+  duration_ms?: number | null;
+  referrer?: string | null;
+  user_agent?: string | null;
+  target?: string | null;
+  metadata?: Record<string, unknown> | null;
+  created_at: string;
+}
+
 export interface QualityReview {
   review_id: string;
   interaction_id: string;

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
+import { ActivityTracker } from "@/components/activity-tracker";
 import "./globals.css";
 import "./console.css";
 import "./command-center.css";
@@ -26,6 +27,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
     <html lang="en" suppressHydrationWarning>
       <body>
         <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        <ActivityTracker />
         {children}
       </body>
     </html>

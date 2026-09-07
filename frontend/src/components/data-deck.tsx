@@ -32,6 +32,7 @@ import { Button } from "@/components/ui/button";
 import { AdminPasswordManager } from "@/components/admin-password-manager";
 import type { MissionView } from "@/components/mission-control";
 import type {
+  ActivityEvent,
   Identity,
   ManagedUser,
   OpsSummary,
@@ -205,6 +206,7 @@ function SourceDeck({ identity }: { identity: Identity }) {
 function OpsDeck() {
   const [summary, setSummary] = useState<OpsSummary | null>(null);
   const [runs, setRuns] = useState<RunStatus[]>([]);
+  const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -215,8 +217,12 @@ function OpsDeck() {
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setRefreshing(true);
     try {
-      const [s, r] = await Promise.all([json<OpsSummary>("/v1/ops/summary"), json<RunStatus[]>("/v1/ops/runs?limit=50")]);
-      setSummary(s); setRuns(r); setError(null);
+      const [s, r, a] = await Promise.all([
+        json<OpsSummary>("/v1/ops/summary"),
+        json<RunStatus[]>("/v1/ops/runs?limit=50"),
+        json<ActivityEvent[]>("/v1/ops/activity?limit=100"),
+      ]);
+      setSummary(s); setRuns(r); setActivity(a); setError(null);
     } catch (e) { setError(e instanceof Error ? e.message : "Ops unavailable"); }
     finally { setLoading(false); setRefreshing(false); }
   }, []);
@@ -234,6 +240,10 @@ function OpsDeck() {
 
   const selected = runs.find((run) => run.run_id === selectedId) ?? null;
   const totalChunks = runs.reduce((sum, run) => sum + run.chunk_count, 0);
+  const pageViews = activity.filter((event) => event.event_type === "page_view").length;
+  const clicks = activity.filter((event) => event.event_type === "click").length;
+  const uniqueVisitors = new Set(activity.map((event) => event.visitor_id).filter(Boolean)).size;
+  const httpErrors = activity.filter((event) => (event.status_code ?? 0) >= 400).length;
 
   if (loading) return <LoadingDeck />;
   return (
@@ -241,6 +251,18 @@ function OpsDeck() {
       <DeckHeader eyebrow="runtime plane" title="Operations telemetry" subtitle="Live ingestion control surface with source coverage, runtime health and recent synchronization runs. This view refreshes automatically every 15 seconds." action={<Button size="sm" onClick={() => void load()} disabled={refreshing}><RefreshCw className={cn("size-3.5", refreshing && "animate-spin")}/>{refreshing ? "Refreshing" : "Refresh"}</Button>}/>
       <ErrorStrip message={error}/>
       {summary && <div className="grid grid-cols-2 gap-3 lg:grid-cols-5"><Stat label="indexed sources" value={`${summary.indexed_sources}/${summary.enabled_sources}`} tone="green"/><Stat label="running" value={summary.running_sources} tone={summary.running_sources ? "amber" : "green"}/><Stat label="failed" value={summary.failed_sources} tone={summary.failed_sources ? "red" : "green"}/><Stat label="redis" value={summary.redis_ok ? "ONLINE" : "DOWN"} tone={summary.redis_ok ? "green" : "red"}/><Stat label="recent chunks" value={totalChunks.toLocaleString()} detail="shown run window"/></div>}
+      <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4"><Stat label="page views" value={pageViews} tone="cyan" detail="recent activity window"/><Stat label="clicks" value={clicks} tone="amber" detail="recent activity window"/><Stat label="visitors" value={uniqueVisitors} tone="green" detail="anonymous + signed in"/><Stat label="http errors" value={httpErrors} tone={httpErrors ? "red" : "green"} detail="status 4xx / 5xx"/></div>
+      <div className="tm-well mt-5 rounded-2xl p-3">
+        <div className="mb-3 flex items-center justify-between gap-3 px-1"><div className="flex items-center gap-2"><Activity className="size-4 text-cyan-300"/><span className="text-sm font-semibold">Site activity channel</span></div><span className="tm-label">{activity.length} recent events</span></div>
+        <div className="space-y-1.5">
+          {activity.slice(0, 16).map((event) => {
+            const actor = event.user_id ? `user ${event.user_id.slice(0, 8)}` : event.visitor_id ? `visitor ${event.visitor_id.slice(0, 8)}` : "anonymous";
+            const failed = (event.status_code ?? 0) >= 400;
+            return <div key={event.event_id} className="tm-run-row grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-3 py-3"><StatusDot status={failed ? "error" : event.event_type === "click" ? "running" : "ok"}/><div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><Badge className={failed ? "text-red-300" : event.event_type === "click" ? "text-amber-300" : event.event_type === "page_view" ? "text-cyan-300" : ""}>{event.event_type}</Badge><span className="truncate font-mono text-[10px] text-slate-300">{event.method ? `${event.method} ` : ""}{event.path}</span></div><div className="mt-1 truncate text-[10px] text-slate-600">{event.target ? `${event.target} · ` : ""}{event.ip_address ?? "no ip"}{event.status_code ? ` · HTTP ${event.status_code}` : ""}{event.duration_ms != null ? ` · ${Math.round(event.duration_ms)}ms` : ""}</div></div><div className="text-right"><div className="text-[9px] text-slate-500">{actor}</div><div className="mt-1 text-[9px] text-slate-700">{formatDate(event.created_at)}</div></div></div>;
+          })}
+          {activity.length === 0 && <EmptyState icon={Activity} title="No activity yet" text="Page views, clicks and user-facing API requests will appear here as they happen."/>}
+        </div>
+      </div>
       <div className="mt-5 flex flex-col gap-2 lg:flex-row lg:items-center"><SearchBar value={query} onChange={setQuery} placeholder="Search source, repository or run id…"/><div className="flex shrink-0 gap-1 overflow-x-auto"><FilterButton active={filter === "all"} onClick={() => setFilter("all")}>All</FilterButton><FilterButton active={filter === "running"} onClick={() => setFilter("running")}>Running</FilterButton><FilterButton active={filter === "succeeded"} onClick={() => setFilter("succeeded")}>Succeeded</FilterButton><FilterButton active={filter === "failed"} onClick={() => setFilter("failed")}>Failed</FilterButton></div></div>
       <div className={cn("mt-4 grid gap-4", selected ? "xl:grid-cols-[minmax(0,1fr)_360px]" : "") }>
         <div className="tm-well rounded-2xl p-3">

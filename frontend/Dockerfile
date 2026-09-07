@@ -16,7 +16,8 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     PORT=3000
 
-RUN addgroup --system --gid 1001 nodejs && \
+RUN apk upgrade --no-cache libcrypto3 libssl3 && \
+    addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs && \
     rm -rf /usr/local/lib/node_modules/npm \
            /usr/local/lib/node_modules/corepack \

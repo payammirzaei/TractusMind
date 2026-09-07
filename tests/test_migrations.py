@@ -19,9 +19,11 @@ def test_migration_chain_contains_auth_and_rbac_revisions() -> None:
     assert "0002_user_auth" in revisions
     assert "0003_oidc_rbac" in revisions
     assert "0004_password_auth" in revisions
+    assert "0005_activity_log" in revisions
     assert revisions["0002_user_auth"].down_revision == "0001_core_schema"
     assert revisions["0003_oidc_rbac"].down_revision == "0002_user_auth"
     assert revisions["0004_password_auth"].down_revision == "0003_oidc_rbac"
+    assert revisions["0005_activity_log"].down_revision == "0004_password_auth"
 
 
 def test_bootstrap_managed_table_contract_includes_full_core_schema() -> None:
@@ -30,3 +32,4 @@ def test_bootstrap_managed_table_contract_includes_full_core_schema() -> None:
     assert "source_state" in CORE_BASELINE_TABLES
     assert "quality_review" in CORE_BASELINE_TABLES
     assert "app_user" in MANAGED_TABLES
+    assert "activity_log" in MANAGED_TABLES
