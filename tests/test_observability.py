@@ -66,3 +66,44 @@ def test_http_middleware_adds_request_id_header() -> None:
 
     assert response.status_code == 200
     assert response.headers["X-Request-ID"]
+
+
+class FakeActivityStore:
+    def __init__(self) -> None:
+        self.events: list[dict[str, object]] = []
+
+    async def record_event(self, **kwargs) -> str:
+        self.events.append(kwargs)
+        return "event-1"
+
+
+def test_http_middleware_persists_request_without_changing_response() -> None:
+    app = _app()
+    store = FakeActivityStore()
+    app.state.activity_store = store
+
+    response = TestClient(app).get("/items/abc", headers={"user-agent": "test-agent"})
+
+    assert response.status_code == 200
+    assert len(store.events) == 1
+    event = store.events[0]
+    assert event["event_type"] == "http_request"
+    assert event["path"] == "/items/abc"
+    assert event["status_code"] == 200
+    assert event["user_agent"] == "test-agent"
+    assert isinstance(event["duration_ms"], float)
+
+
+class FailingActivityStore:
+    async def record_event(self, **_kwargs) -> str:
+        raise RuntimeError("database unavailable")
+
+
+def test_http_activity_failure_does_not_break_request() -> None:
+    app = _app()
+    app.state.activity_store = FailingActivityStore()
+
+    response = TestClient(app).get("/items/abc")
+
+    assert response.status_code == 200
+    assert response.json() == {"item_id": "abc"}
