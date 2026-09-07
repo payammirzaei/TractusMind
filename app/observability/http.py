@@ -39,9 +39,7 @@ def _should_persist(path: str) -> bool:
         return False
     if path.startswith("/health/"):
         return False
-    if path.startswith("/v1/ops/"):
-        return False
-    return True
+    return not path.startswith("/v1/ops/")
 
 
 async def observe_http_request(request: Request, call_next) -> Response:
