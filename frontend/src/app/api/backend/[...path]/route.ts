@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { SESSION_COOKIE_NAME, trustedBrowserMutation } from "@/lib/server-session";
 
 const API_URL = (process.env.TRACTUSMIND_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
-const ALLOWED_V1_ROOTS = new Set(["ask", "conversations", "feedback", "me", "ops"]);
+const ALLOWED_V1_ROOTS = new Set(["activity", "ask", "conversations", "feedback", "me", "ops"]);
 const MAX_BODY_BYTES = 1_048_576;
 const UPSTREAM_TIMEOUT_MS = 120_000;
 
@@ -65,6 +65,10 @@ async function proxy(request: Request, context: Context) {
   headers.set("accept", request.headers.get("accept") ?? "application/json");
   const contentType = request.headers.get("content-type");
   if (contentType) headers.set("content-type", contentType);
+  for (const name of ["user-agent", "referer", "x-forwarded-for"]) {
+    const value = request.headers.get(name);
+    if (value) headers.set(name, value);
+  }
   if (token) headers.set("authorization", `Bearer ${token}`);
 
   let body: ArrayBuffer | undefined;
