@@ -28,7 +28,7 @@ class ActivityLog(Base):
     request_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
     ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
     method: Mapped[str | None] = mapped_column(String(12), nullable=True)
-    path: Mapped[str] = mapped_column(String(2048), index=True)
+    path: Mapped[str] = mapped_column(String(2048))
     status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
     duration_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     referrer: Mapped[str | None] = mapped_column(String(2048), nullable=True)
