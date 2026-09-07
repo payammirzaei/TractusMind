@@ -52,7 +52,6 @@ def upgrade() -> None:
         ("ix_activity_log_session_id", ["session_id"]),
         ("ix_activity_log_visitor_id", ["visitor_id"]),
         ("ix_activity_log_request_id", ["request_id"]),
-        ("ix_activity_log_path", ["path"]),
         ("ix_activity_log_created_at", ["created_at"]),
     ):
         op.create_index(name, "activity_log", columns)
