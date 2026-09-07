@@ -83,11 +83,12 @@ class ActivityStore:
         path_contains: str | None = None,
         limit: int = 100,
     ) -> list[ActivityRecord]:
-        statement = select(ActivityLog).order_by(ActivityLog.created_at.desc()).limit(limit)
+        statement = select(ActivityLog)
         if event_type:
             statement = statement.where(ActivityLog.event_type == event_type)
         if path_contains:
             statement = statement.where(ActivityLog.path.ilike(f"%{path_contains[:200]}%"))
+        statement = statement.order_by(ActivityLog.created_at.desc()).limit(limit)
 
         async with self.sessions() as session:
             events = (await session.scalars(statement)).all()
