@@ -12,6 +12,7 @@ from app.api.routes.activity import ops_router as activity_ops_router
 from app.api.routes.activity import router as activity_router
 from app.api.routes.ask import router as ask_router
 from app.api.routes.auth import router as auth_router
+from app.api.routes.backup_ops import router as backup_ops_router
 from app.api.routes.conversations import router as conversations_router
 from app.api.routes.feedback import router as feedback_router
 from app.api.routes.github_webhook import router as github_webhook_router
@@ -96,6 +97,7 @@ app = FastAPI(
 )
 app.include_router(health_router)
 app.include_router(auth_router)
+app.include_router(backup_ops_router)
 app.include_router(activity_router)
 app.include_router(activity_ops_router)
 app.include_router(ask_router)
