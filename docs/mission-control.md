@@ -82,7 +82,7 @@ claims, allowed algorithms, and configured operator/admin roles.
 - `/sources` — searchable source registry, snapshot commits, drill-down state, admin sync action
 - `/ops` — live ingestion summary, filters, run channel, and run inspector
 - `/quality` — searchable human review queue, review inspector, decisions, and regression status
-- `/admin` — identity search/filter, API-key provisioning/rotation, roles, and enable/disable controls
+- `/admin` — identity search/filter, API-key provisioning/rotation, roles, enable/disable controls, and admin-only full-system backup download
 
 Navigation is role-aware: users see Copilot, operators gain Overview/Sources/Ops/Quality, admins gain
 Access. Backend RBAC remains authoritative even if a client bypasses UI navigation.
