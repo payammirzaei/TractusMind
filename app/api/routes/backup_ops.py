@@ -79,7 +79,7 @@ async def _dump_postgres(settings: Settings, destination: Path) -> None:
     _stdout, stderr = await process.communicate()
     if process.returncode != 0:
         detail = stderr.decode("utf-8", errors="replace").strip()
-        logger.error("system_backup_postgres_failed", returncode=process.returncode, detail=detail[-1000:])
+        logger.error(\n            "system_backup_postgres_failed",\n            returncode=process.returncode,\n            detail=detail[-1000:],\n        )
         raise BackupGenerationError("PostgreSQL dump failed")
     if not destination.exists() or destination.stat().st_size == 0:
         raise BackupGenerationError("PostgreSQL dump was empty")
@@ -93,7 +93,7 @@ async def _snapshot_qdrant(settings: Settings, destination_dir: Path) -> Path:
     timeout = httpx.Timeout(600.0, connect=15.0)
     snapshot_name: str | None = None
 
-    async with httpx.AsyncClient(headers=headers, timeout=timeout, follow_redirects=False) as client:
+    async with httpx.AsyncClient(\n        headers=headers,\n        timeout=timeout,\n        follow_redirects=False,\n    ) as client:
         try:
             created = await client.post(f"{base_url}/collections/{collection_path}/snapshots")
             created.raise_for_status()
@@ -238,13 +238,13 @@ async def build_backup_archive(settings: Settings, workdir: Path) -> Path:
             },
             "redis": {
                 "included": False,
-                "reason": "Transient queues, locks, and runtime coordination are rebuilt after restore.",
+                "reason": (\n                    "Transient queues, locks, and runtime coordination are rebuilt after restore."\n                ),
             },
         },
         "sources": sources,
         "security": {
             "standalone_environment_secrets_included": False,
-            "note": "The PostgreSQL dump contains application credential hashes required for recovery.",
+            "note": (\n                "The PostgreSQL dump contains application credential hashes required for recovery."\n            ),
         },
     }
 
