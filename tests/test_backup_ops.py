@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -70,3 +71,40 @@ def test_postgres_environment_uses_url_without_exporting_dsn() -> None:
     assert env["PGUSER"] == "backup_user"
     assert env["PGPASSWORD"] == "backup_password"
     assert env["PGSSLMODE"] == "require"
+
+
+async def test_qdrant_backup_uses_full_storage_snapshot(monkeypatch, tmp_path: Path) -> None:
+    calls: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.method, request.url.path))
+        if request.method == "POST" and request.url.path == "/snapshots":
+            return httpx.Response(
+                200,
+                json={"result": {"name": "full-storage.snapshot"}},
+            )
+        if request.method == "GET" and request.url.path == "/snapshots/full-storage.snapshot":
+            return httpx.Response(200, content=b"qdrant-full-storage")
+        if request.method == "DELETE" and request.url.path == "/snapshots/full-storage.snapshot":
+            return httpx.Response(200, json={"result": True})
+        return httpx.Response(404, json={"status": {"error": "unexpected route"}})
+
+    transport = httpx.MockTransport(handler)
+    real_async_client = httpx.AsyncClient
+
+    def client_factory(**kwargs):
+        return real_async_client(transport=transport, **kwargs)
+
+    monkeypatch.setattr(backup_ops.httpx, "AsyncClient", client_factory)
+
+    snapshot = await backup_ops._snapshot_qdrant(
+        Settings(qdrant_url="http://qdrant.test"),
+        tmp_path,
+    )
+
+    assert snapshot.read_bytes() == b"qdrant-full-storage"
+    assert calls == [
+        ("POST", "/snapshots"),
+        ("GET", "/snapshots/full-storage.snapshot"),
+        ("DELETE", "/snapshots/full-storage.snapshot"),
+    ]

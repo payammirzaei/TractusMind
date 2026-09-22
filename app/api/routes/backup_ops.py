@@ -90,9 +90,7 @@ async def _dump_postgres(settings: Settings, destination: Path) -> None:
 
 
 async def _snapshot_qdrant(settings: Settings, destination_dir: Path) -> Path:
-    collection = settings.qdrant_collection
     base_url = settings.qdrant_url.rstrip("/")
-    collection_path = quote(collection, safe="")
     headers = {"api-key": settings.qdrant_api_key} if settings.qdrant_api_key else {}
     timeout = httpx.Timeout(600.0, connect=15.0)
     snapshot_name: str | None = None
@@ -103,7 +101,11 @@ async def _snapshot_qdrant(settings: Settings, destination_dir: Path) -> Path:
         follow_redirects=False,
     ) as client:
         try:
-            created = await client.post(f"{base_url}/collections/{collection_path}/snapshots")
+            # A full-storage snapshot captures every collection plus aliases on this
+            # single-node Qdrant instance. It is deliberately independent of
+            # QDRANT_COLLECTION so backup cannot silently miss or fail on a renamed
+            # collection.
+            created = await client.post(f"{base_url}/snapshots")
             created.raise_for_status()
             result = created.json().get("result") or {}
             snapshot_name = result.get("name")
@@ -118,7 +120,7 @@ async def _snapshot_qdrant(settings: Settings, destination_dir: Path) -> Path:
             snapshot_path = quote(snapshot_name, safe="")
             async with client.stream(
                 "GET",
-                f"{base_url}/collections/{collection_path}/snapshots/{snapshot_path}",
+                f"{base_url}/snapshots/{snapshot_path}",
             ) as response:
                 response.raise_for_status()
                 with destination.open("wb") as handle:
@@ -130,6 +132,14 @@ async def _snapshot_qdrant(settings: Settings, destination_dir: Path) -> Path:
             return destination
         except BackupGenerationError:
             raise
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "system_backup_qdrant_failed",
+                error=type(exc).__name__,
+                status_code=exc.response.status_code,
+                detail=exc.response.text[-500:],
+            )
+            raise BackupGenerationError("Qdrant snapshot failed") from exc
         except (httpx.HTTPError, ValueError, TypeError) as exc:
             logger.error("system_backup_qdrant_failed", error=type(exc).__name__)
             raise BackupGenerationError("Qdrant snapshot failed") from exc
@@ -137,9 +147,7 @@ async def _snapshot_qdrant(settings: Settings, destination_dir: Path) -> Path:
             if snapshot_name:
                 snapshot_path = quote(snapshot_name, safe="")
                 try:
-                    cleanup = await client.delete(
-                        f"{base_url}/collections/{collection_path}/snapshots/{snapshot_path}"
-                    )
+                    cleanup = await client.delete(f"{base_url}/snapshots/{snapshot_path}")
                     cleanup.raise_for_status()
                 except httpx.HTTPError:
                     logger.warning(
@@ -226,7 +234,7 @@ async def build_backup_archive(settings: Settings, workdir: Path) -> Path:
         for source in load_source_registry()
     ]
     manifest: dict[str, object] = {
-        "format_version": 1,
+        "format_version": 2,
         "created_at": created_at.isoformat(),
         "deploy_revision": os.environ.get("TRACTUSMIND_DEPLOY_REV"),
         "components": {
