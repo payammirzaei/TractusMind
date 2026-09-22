@@ -401,46 +401,22 @@ function AdminDeck() {
     finally { setBusy(null); }
   }
 
-  async function downloadBackup() {
+  function downloadBackup() {
     setBackupBusy(true); setBackupMessage(null); setError(null);
-    try {
-      const response = await fetch("/api/backend/v1/ops/backup", { method: "POST", cache: "no-store" });
-      if (!response.ok) {
-        let detail = `Backup failed: HTTP ${response.status}`;
-        try {
-          const payload = await response.json() as { detail?: string };
-          if (payload.detail) detail = payload.detail;
-        } catch {
-          // Preserve the status-based message for non-JSON upstream errors.
-        }
-        throw new Error(detail);
-      }
 
-      const blob = await response.blob();
-      const disposition = response.headers.get("content-disposition") ?? "";
-      const encoded = disposition.match(/filename\*=utf-8''([^;]+)/i);
-      const plain = disposition.match(/filename="?([^";]+)"?/i);
-      const filename = encoded?.[1]
-        ? decodeURIComponent(encoded[1])
-        : plain?.[1] ?? "tractusmind-backup.zip";
+    // Let the browser handle the attachment response natively. Full-system
+    // backups can be hundreds of MB, so buffering response.blob() in the page
+    // wastes memory and can prevent the download prompt from appearing.
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = "/api/backend/v1/ops/backup";
+    form.style.display = "none";
+    document.body.appendChild(form);
+    form.submit();
+    form.remove();
 
-      const objectUrl = URL.createObjectURL(blob);
-      try {
-        const anchor = document.createElement("a");
-        anchor.href = objectUrl;
-        anchor.download = filename;
-        document.body.appendChild(anchor);
-        anchor.click();
-        anchor.remove();
-      } finally {
-        URL.revokeObjectURL(objectUrl);
-      }
-      setBackupMessage(`Downloaded ${(blob.size / 1024 / 1024).toFixed(1)} MB · ${filename}`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "System backup failed");
-    } finally {
-      setBackupBusy(false);
-    }
+    setBackupMessage("Backup requested. Your browser will start the download when the archive is ready.");
+    window.setTimeout(() => setBackupBusy(false), 2_000);
   }
 
   const filtered = useMemo(() => {
