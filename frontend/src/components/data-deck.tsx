@@ -11,6 +11,7 @@ import {
   CircleDot,
   Copy,
   Database,
+  Download,
   Filter,
   GitCommitHorizontal,
   KeyRound,
@@ -373,6 +374,8 @@ function AdminDeck() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupMessage, setBackupMessage] = useState<string | null>(null);
   const load = useCallback(() => json<ManagedUser[]>("/v1/ops/users").then((items) => { setUsers(items); setError(null); }).catch((e) => setError(e.message)).finally(() => setLoading(false)), []);
   useEffect(() => { void load(); }, [load]);
 
@@ -398,6 +401,48 @@ function AdminDeck() {
     finally { setBusy(null); }
   }
 
+  async function downloadBackup() {
+    setBackupBusy(true); setBackupMessage(null); setError(null);
+    try {
+      const response = await fetch("/api/backend/v1/ops/backup", { method: "POST", cache: "no-store" });
+      if (!response.ok) {
+        let detail = `Backup failed: HTTP ${response.status}`;
+        try {
+          const payload = await response.json() as { detail?: string };
+          if (payload.detail) detail = payload.detail;
+        } catch {
+          // Preserve the status-based message for non-JSON upstream errors.
+        }
+        throw new Error(detail);
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") ?? "";
+      const encoded = disposition.match(/filename\*=utf-8''([^;]+)/i);
+      const plain = disposition.match(/filename="?([^";]+)"?/i);
+      const filename = encoded?.[1]
+        ? decodeURIComponent(encoded[1])
+        : plain?.[1] ?? "tractusmind-backup.zip";
+
+      const objectUrl = URL.createObjectURL(blob);
+      try {
+        const anchor = document.createElement("a");
+        anchor.href = objectUrl;
+        anchor.download = filename;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
+      setBackupMessage(`Downloaded ${(blob.size / 1024 / 1024).toFixed(1)} MB · ${filename}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "System backup failed");
+    } finally {
+      setBackupBusy(false);
+    }
+  }
+
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return users.filter((user) => (!needle || [user.display_name, user.role, user.auth_type, user.api_key_prefix ?? ""].some((value) => value.toLowerCase().includes(needle))) && (filter === "all" || (filter === "enabled" ? user.enabled : !user.enabled)));
@@ -419,6 +464,13 @@ function AdminDeck() {
         </div>
         <div className="space-y-4">
           <AdminPasswordManager />
+          <div className="tm-inspector rounded-2xl p-4">
+            <div className="mb-3 flex items-center gap-2"><Download className="size-4 text-cyan-300"/><span className="text-sm font-semibold">Full system backup</span></div>
+            <p className="text-[11px] leading-5 text-slate-600">Download one recovery bundle with PostgreSQL state, the Qdrant knowledge snapshot, source registry and checksums. Redis queues/locks and standalone environment secrets are intentionally excluded.</p>
+            <div className="mt-3 rounded-xl border border-amber-300/10 bg-amber-300/5 p-3 text-[10px] leading-5 text-amber-100/70">The archive contains application credential hashes and production data. Store it like a secret.</div>
+            <Button variant="primary" className="mt-4 w-full" onClick={() => void downloadBackup()} disabled={backupBusy}><Download className={cn("size-4", backupBusy && "animate-pulse")}/>{backupBusy ? "Building backup…" : "Download full backup"}</Button>
+            {backupMessage && <div className="mt-3 text-[10px] leading-5 text-emerald-300">{backupMessage}</div>}
+          </div>
           <div className="tm-inspector rounded-2xl p-4"><div className="mb-4 flex items-center gap-2"><Plus className="size-4 text-cyan-300"/><span className="text-sm font-semibold">Provision API identity</span></div><label className="tm-label">display name</label><input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void createUser(); }} className="tm-field mt-2 w-full rounded-xl px-3 py-2.5 text-sm outline-none" placeholder="Engineering operator"/><label className="tm-label mt-4 block">role</label><div className="mt-2 grid grid-cols-3 gap-2">{(["user","operator","admin"] as UserRole[]).map((item) => <button key={item} onClick={() => setRole(item)} className={cn("tm-control rounded-lg px-2 py-2 text-[10px] uppercase tracking-wider", role === item ? "text-cyan-200" : "text-slate-500")}>{item}</button>)}</div><Button variant="primary" className="mt-4 w-full" onClick={() => void createUser()} disabled={!name.trim() || busy === "create"}><KeyRound className="size-4"/>{busy === "create" ? "Provisioning…" : "Create identity"}</Button></div>
           {credential && <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="rounded-2xl border border-amber-300/15 bg-amber-300/5 p-4"><div className="flex items-center justify-between"><div><div className="tm-label text-amber-300">one-time credential</div><div className="mt-1 text-xs text-amber-100/70">Copy it now. It will not be shown again.</div></div><button onClick={() => setCredential(null)} className="text-amber-200/50 hover:text-amber-200"><X className="size-4"/></button></div><div className="mt-3 break-all rounded-xl bg-black/25 p-3 font-mono text-[10px] leading-5 text-amber-100">{credential}</div><Button className="mt-3 w-full" onClick={async () => { await navigator.clipboard.writeText(credential); setCopied(true); window.setTimeout(() => setCopied(false), 1200); }}>{copied ? <Check className="size-3.5 text-emerald-300"/> : <Copy className="size-3.5"/>}{copied ? "Copied" : "Copy credential"}</Button></motion.div>}
         </div>

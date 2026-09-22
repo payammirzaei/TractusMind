@@ -6,6 +6,7 @@ const API_URL = (process.env.TRACTUSMIND_API_URL ?? "http://localhost:8000").rep
 const ALLOWED_V1_ROOTS = new Set(["activity", "ask", "conversations", "feedback", "me", "ops"]);
 const MAX_BODY_BYTES = 1_048_576;
 const UPSTREAM_TIMEOUT_MS = 120_000;
+const BACKUP_TIMEOUT_MS = 600_000;
 
 type Context = { params: Promise<{ path: string[] }> };
 
@@ -30,7 +31,7 @@ function trustedMutation(request: Request) {
 
 function responseHeaders(upstream: Response) {
   const headers = new Headers();
-  for (const name of ["content-type", "content-disposition", "x-request-id", "retry-after"]) {
+  for (const name of ["content-type", "content-disposition", "x-request-id", "retry-after", "x-tractusmind-backup"]) {
     const value = upstream.headers.get(name);
     if (value) headers.set(name, value);
   }
@@ -86,7 +87,7 @@ async function proxy(request: Request, context: Context) {
       body,
       cache: "no-store",
       redirect: "manual",
-      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      signal: AbortSignal.timeout(path[0] === "v1" && path[1] === "ops" && path[2] === "backup" ? BACKUP_TIMEOUT_MS : UPSTREAM_TIMEOUT_MS),
     });
     return new Response(upstream.body, {
       status: upstream.status,
