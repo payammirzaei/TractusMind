@@ -401,22 +401,101 @@ function AdminDeck() {
     finally { setBusy(null); }
   }
 
-  function downloadBackup() {
+  async function downloadBackup() {
     setBackupBusy(true); setBackupMessage(null); setError(null);
 
-    // Let the browser handle the attachment response natively. Full-system
-    // backups can be hundreds of MB, so buffering response.blob() in the page
-    // wastes memory and can prevent the download prompt from appearing.
-    const form = document.createElement("form");
-    form.method = "POST";
-    form.action = "/api/backend/v1/ops/backup";
-    form.style.display = "none";
-    document.body.appendChild(form);
-    form.submit();
-    form.remove();
+    type BackupWriter = {
+      write(data: Uint8Array): Promise<void>;
+      close(): Promise<void>;
+      abort(reason?: unknown): Promise<void>;
+    };
+    type BackupFileHandle = { createWritable(): Promise<BackupWriter> };
+    type BackupSavePicker = (options: {
+      suggestedName: string;
+      types: Array<{ description: string; accept: Record<string, string[]> }>;
+    }) => Promise<BackupFileHandle>;
 
-    setBackupMessage("Backup requested. Your browser will start the download when the archive is ready.");
-    window.setTimeout(() => setBackupBusy(false), 2_000);
+    const savePicker = (
+      window as Window & { showSaveFilePicker?: BackupSavePicker }
+    ).showSaveFilePicker;
+
+    if (!savePicker) {
+      setBackupBusy(false);
+      setError("Large backup downloads require a Chromium browser with direct file streaming support.");
+      return;
+    }
+
+    const now = new Date();
+    const stamp = now.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+    let writer: BackupWriter | null = null;
+
+    try {
+      const fileHandle = await savePicker.call(window, {
+        suggestedName: `tractusmind-backup-${stamp}.zip`,
+        types: [{ description: "ZIP archive", accept: { "application/zip": [".zip"] } }],
+      });
+
+      setBackupMessage("Building backup… this can take around 30 seconds.");
+
+      const response = await fetch("/api/backend/v1/ops/backup", {
+        method: "POST",
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        let detail = `Backup failed: HTTP ${response.status}`;
+        try {
+          const payload = await response.json() as { detail?: string };
+          if (payload.detail) detail = payload.detail;
+        } catch {
+          // Preserve the status-based message for non-JSON upstream errors.
+        }
+        throw new Error(detail);
+      }
+      if (!response.body) throw new Error("Backup response did not include a download stream");
+
+      writer = await fileHandle.createWritable();
+      const reader = response.body.getReader();
+      const total = Number(response.headers.get("content-length") ?? 0);
+      let received = 0;
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          await writer.write(value);
+          received += value.byteLength;
+          if (total > 0) {
+            const percent = Math.min(100, Math.round((received / total) * 100));
+            setBackupMessage(
+              `Downloading directly to disk… ${percent}% · ${(received / 1024 / 1024).toFixed(0)} / ${(total / 1024 / 1024).toFixed(0)} MB`,
+            );
+          } else {
+            setBackupMessage(
+              `Downloading directly to disk… ${(received / 1024 / 1024).toFixed(0)} MB`,
+            );
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+
+      await writer.close();
+      writer = null;
+      setBackupMessage(
+        `Backup saved · ${(received / 1024 / 1024).toFixed(1)} MB`,
+      );
+    } catch (e) {
+      if (writer) {
+        try { await writer.abort(e); } catch { /* Best-effort cleanup of a partial file. */ }
+      }
+      if (e instanceof DOMException && e.name === "AbortError") {
+        setBackupMessage("Backup download cancelled.");
+      } else {
+        setError(e instanceof Error ? e.message : "System backup failed");
+      }
+    } finally {
+      setBackupBusy(false);
+    }
   }
 
   const filtered = useMemo(() => {
