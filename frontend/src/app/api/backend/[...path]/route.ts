@@ -31,7 +31,7 @@ function trustedMutation(request: Request) {
 
 function responseHeaders(upstream: Response) {
   const headers = new Headers();
-  for (const name of ["content-type", "content-disposition", "x-request-id", "retry-after", "x-tractusmind-backup"]) {
+  for (const name of ["content-type", "content-length", "content-disposition", "x-request-id", "retry-after", "x-tractusmind-backup"]) {
     const value = upstream.headers.get(name);
     if (value) headers.set(name, value);
   }
